@@ -5,17 +5,23 @@ fn main() -> eframe::Result<()> {
         .filter("info")
         .init();
 
-    // The window draws Exo's own 41px tab strip under the native macOS traffic lights, so the
-    // content runs behind a transparent titlebar. The default size is the original app's
-    // 1280×800 canvas.
+    // The default canvas is the original app's 1280×800 logical points. On macOS Exo draws its
+    // own 41px tab strip under the traffic lights, so the content runs behind a transparent
+    // titlebar. Those three options only describe that macOS arrangement; on Windows/Linux keep
+    // the native titlebar and eframe's default DPI handling.
+    let viewport = egui::ViewportBuilder::default()
+        .with_title("Exo for HEY")
+        .with_inner_size([1280.0, 800.0])
+        .with_min_inner_size([880.0, 600.0]);
+
+    #[cfg(target_os = "macos")]
+    let viewport = viewport
+        .with_fullsize_content_view(true)
+        .with_title_shown(false)
+        .with_titlebar_shown(false);
+
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("Exo for HEY")
-            .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([880.0, 600.0])
-            .with_fullsize_content_view(true)
-            .with_title_shown(false)
-            .with_titlebar_shown(false),
+        viewport,
         ..Default::default()
     };
 

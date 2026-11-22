@@ -2280,6 +2280,16 @@ fn split_addresses(value: &str) -> Vec<String> {
 
 impl eframe::App for ExoApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // One-shot startup diagnostics for DPI/viewport sizing across platforms.
+        static LOGGED_LAYOUT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !LOGGED_LAYOUT.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            let ctx = ui.ctx();
+            let ppp = ctx.pixels_per_point();
+            let size = ui.max_rect().size();
+            let inner = ctx.input(|i| i.viewport().inner_rect);
+            log::info!("[exo-layout] ppp={ppp} ui_max_rect={size:?} viewport_inner={inner:?}");
+        }
+
         let ctx = ui.ctx().clone();
         self.p.install(&ctx);
         self.pump_events();
