@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 const SERVICE: &str = "exo.hey.auth";
 const ACCOUNT: &str = "default";
-const REDIRECT_PATH: &str = "/oauth/callback";
+const REDIRECT_PATH: &str = "/callback";
 
 /// Credentials persisted between runs. Nothing here is logged or shown to the user.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -195,7 +195,7 @@ pub fn sign_in(config: &Config) -> Result<SignIn, AuthError> {
         &metadata,
         &config.oauth_client_id,
         &redirect_uri,
-        Some("read write send"),
+        None,
         &state,
         &pkce,
         &install,
