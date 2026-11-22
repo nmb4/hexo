@@ -14,8 +14,7 @@ use crate::{
 /// What the pipeline needs to know about a message.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Message {
-    /// The body as HTML: the `text/html` part, or a plain-text one through [`text_to_html`]
-    /// ([`html_from_payload`] picks it).
+    /// The body as HTML: the `text/html` part, or a plain-text one through [`text_to_html`].
     pub html: String,
     /// The sender's address.
     pub from_email: String,
@@ -177,99 +176,6 @@ pub fn render_fragment(html: &str) -> Render {
 /// A plain-text body as HTML: paragraphs, `>` quotes as blockquotes.
 pub fn text_to_html(text: &str) -> String {
     plain::to_html(text)
-}
-
-/// The HTML shown for a Gmail message payload: an alternative's richest part, or each inline
-/// part of a mixed message.
-pub fn html_from_payload(part: &gmail::MessagePart) -> String {
-    html_from_part(part).unwrap_or_default()
-}
-
-fn html_from_part(part: &gmail::MessagePart) -> Option<String> {
-    let mime = part
-        .mime_type
-        .as_deref()
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let data = || {
-        part.body
-            .as_ref()
-            .and_then(|body| body.data.as_ref())
-            .map(|data| String::from_utf8_lossy(data).into_owned())
-    };
-    let is_text =
-        |p: &gmail::MessagePart| matches!(p.mime_type.as_deref(), Some("text/plain" | "text"));
-    match mime.as_str() {
-        "text/plain" | "text" => data().map(|text| plain::to_html(&text)),
-        "text/html" => data(),
-        "multipart/alternative" => {
-            if is_attachment(part) {
-                return None;
-            }
-            let parts = &part.parts;
-            parts
-                .iter()
-                .rev()
-                .filter(|p| !is_text(p))
-                .find_map(|p| html_from_part(p).filter(|html| !html.is_empty()))
-                .or_else(|| {
-                    parts.iter().filter(|p| is_text(p)).find_map(|p| {
-                        let data = p.body.as_ref()?.data.as_ref()?;
-                        let text = String::from_utf8_lossy(data);
-                        text.trim_start()
-                            .to_ascii_lowercase()
-                            .starts_with("<!doctype html")
-                            .then(|| text.into_owned())
-                    })
-                })
-                .or_else(|| {
-                    parts
-                        .iter()
-                        .rev()
-                        .filter(|p| is_text(p))
-                        .find_map(|p| html_from_part(p).filter(|h| !h.is_empty()))
-                })
-        }
-        "multipart/mixed" => Some(
-            part.parts
-                .iter()
-                .map(|p| {
-                    if is_attachment(p) {
-                        String::new()
-                    } else {
-                        html_from_part(p).unwrap_or_default()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n"),
-        ),
-        _ => {
-            let nested = mime.starts_with("multipart/") || mime.starts_with("message/rfc822");
-            if !nested {
-                return None;
-            }
-            part.parts
-                .iter()
-                .filter(|p| !is_attachment(p))
-                .filter(|p| {
-                    let mime = p.mime_type.as_deref().unwrap_or_default();
-                    mime.starts_with("multipart/") || mime == "text/html" || is_text(p)
-                })
-                .find_map(|p| html_from_part(p).filter(|h| !h.is_empty()))
-        }
-    }
-}
-
-/// `Content-Disposition: attachment`, except Outlook's TNEF wrappers.
-fn is_attachment(part: &gmail::MessagePart) -> bool {
-    let header = |name: &str| {
-        part.headers
-            .iter()
-            .find(|h| h.name.eq_ignore_ascii_case(name))
-            .map(|h| h.value.to_ascii_lowercase())
-    };
-    header("content-disposition").is_some_and(|value| value.contains("attachment"))
-        && !header("content-type").is_some_and(|value| value.contains("application/ms-tnef"))
 }
 
 fn sender(message: &Message) -> Sender {

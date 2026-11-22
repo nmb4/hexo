@@ -18,7 +18,6 @@ blitz-traits = { workspace = true }
 exo-fonts = { workspace = true }
 fancy-regex = { workspace = true }
 gif = { workspace = true }
-gmail = { workspace = true }
 html5ever = { workspace = true }
 image = { workspace = true, features = ["gif", "webp"] }
 log = { workspace = true }

@@ -1,6 +1,6 @@
 [package]
 name = "exo-auth"
-description = "Google sign-in for Exo: installed-app OAuth with PKCE and a loopback redirect, refreshing access tokens, and the account list with refresh tokens in the Keychain."
+description = "HEY sign-in for Exo: OAuth 2.0 with PKCE over a loopback redirect, token refresh, and cross-platform credential storage."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,22 +8,14 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-base64 = { workspace = true }
-getrandom = { workspace = true }
-gmail = { workspace = true }
-jiff = { workspace = true }
-log = { workspace = true }
+hey-sdk = { workspace = true }
+tokio = { workspace = true }
+async-trait = "0.1"
+url = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["io-util"] }
-url = { workspace = true }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-security-framework = { workspace = true }
-
-[dev-dependencies]
-gmail-mock = { workspace = true }
-reqwest = { workspace = true }
-tempfile = { workspace = true }
-tokio = { workspace = true, features = ["test-util"] }
+log = { workspace = true }
+getrandom = { workspace = true }
+keyring = { workspace = true }
+dirs = { workspace = true }

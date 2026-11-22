@@ -74,7 +74,7 @@ pub use linkify::{links, match_link};
 pub use net::{Done, Fetch, decode_data_url};
 pub use paste::prepare_paste;
 pub use pipeline::{
-    Message, RenderOptions, html_from_payload, render, render_fragment, render_with, text_to_html,
+    Message, RenderOptions, render, render_fragment, render_with, text_to_html,
 };
 pub use pixels::is_read_receipt;
 pub use print::{BLOCKED_SCHEME, REMOTE_SCHEME_PREFIX, printable_body};

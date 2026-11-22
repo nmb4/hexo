@@ -6,153 +6,70 @@ members = ["crates/*"]
 license = "MIT"
 publish = false
 edition = "2024"
-version = "0.2.0"
-rust-version = "1.98"
+version = "0.3.0"
+rust-version = "1.88"
 
 [workspace.dependencies]
-gmail = { path = "crates/gmail" }
 exo-ui = { path = "crates/exo-ui" }
 exo-mail = { path = "crates/exo-mail" }
 exo-auth = { path = "crates/exo-auth" }
 exo-store = { path = "crates/exo-store" }
 exo-fonts = { path = "crates/exo-fonts" }
-gmail-mock = { path = "crates/gmail-mock" }
-exo-editor = { path = "crates/exo-editor" }
 exo-commands = { path = "crates/exo-commands" }
 
+# Cross-platform web and data stack.
 url = "2"
-psl = "2"
 log = "0.4"
 regex = "1"
-libc = "0.2"
-gif = "0.14"
-axum = "0.8"
-anyhow = "1"
-sha2 = "0.10"
-objc2 = "0.6"
-ring = "0.17"
-flate2 = "1.1"
-peniko = "0.6"
-tempfile = "3"
-rcgen = "0.14"
-futures = "0.3"
-egui = "0.36.2"
-memmap2 = "0.9"
 base64 = "0.22"
-thiserror = "2"
-serde_json = "1"
-serde_with = "3"
-getrandom = "0.3"
-anyrender = "0.15"
-html5ever = "0.40"
-env_logger = "0.11"
-fancy-regex = "0.14"
-mail-parser = "0.11"
-mail-builder = "0.4"
-serde_ignored = "0.1"
-rustls-pki-types = "1"
-markup5ever_rcdom = "=0.40.1"
-toasty-driver-sqlite = "0.11"
-unicode-normalization = "0.1"
+gif = "0.14"
 clap = { version = "4", features = ["derive"] }
-serde = { version = "1", features = ["derive"] }
-tower = { version = "0.5", features = ["util"] }
+tempfile = "3"
 jiff = { version = "0.2", features = ["serde"] }
-tower-http = { version = "0.6", features = ["cors"] }
-winit = { version = "0.30", default-features = false }
-resvg = { version = "0.45", default-features = false }
-arboard = { version = "3.7", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+tokio = { version = "1", features = ["net", "sync", "time", "signal", "macros", "rt-multi-thread"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "json"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
-egui_kittest = { version = "0.36.2", features = ["wgpu"] }
-rustls-webpki = { version = "0.103", features = ["ring"] }
+keyring = { version = "3", features = ["sync-secret-service"] }
+dirs = "6"
+
+# HEY's official Rust SDK.
+hey-sdk = "0.36"
+
+# UI stack: egui/eframe + fastframe + Blitz (kept from Exo).
+egui = "0.36.2"
+eframe = { version = "0.36.2", default-features = false, features = ["wgpu", "glow", "links", "accesskit"] }
 egui_extras = { version = "0.36.2", default-features = false }
-security-framework = { version = "3.7", default-features = false }
-style_config = { version = "0.24.0", package = "stylo_static_prefs" }
-anyrender_vello_cpu = { version = "0.19", features = ["multithreading"] }
+egui_kittest = { version = "0.36.2", features = ["wgpu"] }
+arboard = { version = "3.7", default-features = false }
 image = { version = "0.25", default-features = false, features = ["png"] }
-block2 = { version = "0.6", default-features = false, features = ["std"] }
-skrifa = { version = "0.44", default-features = false, features = ["std"] }
-dispatch2 = { version = "0.3", default-features = false, features = ["std"] }
+peniko = "0.6"
 parley = { version = "0.13", default-features = false, features = ["system"] }
-icu_segmenter = { version = "2.3", default-features = false, features = ["compiled_data"] }
+skrifa = { version = "0.44", default-features = false, features = ["std"] }
+anyrender = "0.15"
+anyrender_vello_cpu = { version = "0.19", features = ["multithreading"] }
+html5ever = "0.40"
+markup5ever_rcdom = "=0.40.1"
+fancy-regex = "0.14"
+unicode-normalization = "0.1"
+memmap2 = "0.9"
+getrandom = "0.3"
+
+# fastframe: the native-shell helpers Exo uses.
+fastframe-dirs = { git = "https://github.com/m1guelpf-forks/fastframe", branch = "notification-subtitle" }
+fastframe-emoji = { git = "https://github.com/m1guelpf-forks/fastframe", branch = "notification-subtitle" }
+fastframe-log = { git = "https://github.com/m1guelpf-forks/fastframe", branch = "notification-subtitle" }
+fastframe-notifications = { git = "https://github.com/m1guelpf-forks/fastframe", branch = "notification-subtitle" }
+
+# Blitz HTML email renderer (Exo's fork).
 blitz-html = { git = "https://github.com/m1guelpf-forks/blitz", branch = "inline-box-decorations" }
 blitz-traits = { git = "https://github.com/m1guelpf-forks/blitz", branch = "inline-box-decorations" }
-fastframe-log = { git = "https://github.com/m1guelpf-forks/fastframe", branch = "notification-subtitle" }
-fastframe-dirs = { git = "https://github.com/m1guelpf-forks/fastframe", branch = "notification-subtitle" }
-fastframe-file = { git = "https://github.com/m1guelpf-forks/fastframe", branch = "notification-subtitle" }
-fastframe-emoji = { git = "https://github.com/m1guelpf-forks/fastframe", branch = "notification-subtitle" }
-fastframe-shell = { git = "https://github.com/m1guelpf-forks/fastframe", branch = "notification-subtitle" }
-fastframe-titlebar = { git = "https://github.com/m1guelpf-forks/fastframe", branch = "notification-subtitle" }
-fastframe-instance = { git = "https://github.com/m1guelpf-forks/fastframe", branch = "notification-subtitle" }
-fastframe-autostart = { git = "https://github.com/m1guelpf-forks/fastframe", branch = "notification-subtitle" }
-fastframe-notifications = { git = "https://github.com/m1guelpf-forks/fastframe", branch = "notification-subtitle" }
-fastframe-update = { git = "https://github.com/m1guelpf-forks/fastframe", branch = "notification-subtitle", features = [
-    "reqwest",
-] }
-blitz-paint = { git = "https://github.com/m1guelpf-forks/blitz", branch = "inline-box-decorations", default-features = false, features = [
-    "svg",
-] }
-fastframe-graphics = { git = "https://github.com/m1guelpf-forks/fastframe", branch = "notification-subtitle", features = [
-    "wgpu",
-] }
-objc2-foundation = { version = "0.3", default-features = false, features = [
-    "std",
-] }
-objc2-app-kit = { version = "0.3", default-features = false, features = [
-    "std",
-] }
-objc2-quick-look-ui = { version = "0.3", default-features = false, features = [
-    "std",
-] }
-objc2-web-kit = { version = "0.3", default-features = false, features = [
-    "std",
-] }
-objc2-core-foundation = { version = "0.3", default-features = false, features = [
-    "std",
-] }
-objc2-map-kit = { version = "0.3", default-features = false, features = [
-    "std",
-    "MKLocalSearchCompleter",
-] }
-toasty = { version = "0.11", features = [
-    "jiff",
-    "serde",
-    "sqlite",
-    "migration",
-] }
-eframe = { version = "0.36.2", default-features = false, features = [
-    "wgpu",
-    "glow",
-    "links",
-    "accesskit",
-] }
-blitz-dom = { git = "https://github.com/m1guelpf-forks/blitz", branch = "inline-box-decorations", default-features = false, features = [
-    "svg",
-    "woff",
-    "floats",
-    "system-fonts",
-] }
-objc2-system-configuration = { version = "0.3", default-features = false, features = [
-    "std",
-    "libc",
-    "dispatch2",
-    "SCNetworkReachability",
-] }
-reqwest = { version = "0.12", default-features = false, features = [
-    "json",
-    "http2",
-    "stream",
-    "multipart",
-    "rustls-tls",
-] }
-tokio = { version = "1", features = [
-    "net",
-    "sync",
-    "time",
-    "signal",
-    "macros",
-    "rt-multi-thread",
-] }
+blitz-paint = { git = "https://github.com/m1guelpf-forks/blitz", branch = "inline-box-decorations", default-features = false, features = ["svg"] }
+blitz-dom = { git = "https://github.com/m1guelpf-forks/blitz", branch = "inline-box-decorations", default-features = false, features = ["svg", "woff", "floats", "system-fonts"] }
+style_config = { version = "0.24.0", package = "stylo_static_prefs" }
 
 [patch.crates-io]
 egui = { git = "https://github.com/crmne/egui", rev = "6ce633ba5f7f64d19ef6d204f9377da560bb546b" }

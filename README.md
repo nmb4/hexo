@@ -1,65 +1,61 @@
-# Exo
+# Exo for HEY
 
-A fast, local and native Gmail client for macOS, (heavily) inspired by Superhuman.
+A fast, local-first, keyboard-driven native desktop client for [HEY](https://www.hey.com), built on Exo's egui/eframe + fastframe + Blitz stack.
 
-It talks to Gmail directly (no third-party servers!) and uses native technologies for maximum performance (written in Rust, no Electron or webview overhead).
+Exo talks directly to HEY through the official [`hey-sdk`](https://github.com/basecamp/hey-sdk) — no Google APIs, no Gmail abstractions, no third-party mail servers. It runs on macOS, Linux and Windows.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/screenshot-dark.png">
   <img alt="Exo's inbox" src=".github/screenshot-light.png">
 </picture>
 
-## Install
+> The screenshots above are from the original Gmail-based Exo and are kept for historical context. The HEY client uses a refreshed three-pane layout with the same design language.
 
-1. Download the `.dmg` from the [latest release](https://github.com/m1guelpf/Exo/releases/latest).
-2. Open it and drag Exo into Applications.
+## What's in the box
 
-You'll need to create your own Google sign-in client to use Exo. See below on how to do that (it's free and takes only a few minutes).
+- **HEY's workflow, natively**: The Imbox, The Feed, Paper Trail, Set Aside, Reply Later, Bubble Up and Bubble Up scheduling, labels/folders, and The Screener.
+- **Local-first**: a per-account SQLite cache means the thread list opens instantly. HEY's incremental posting-changes feed keeps it current in the background.
+- **Keyboard first**: `j`/`k` to move, `Enter` to open, `e` to Set Aside, `r` to reply, `c` to compose, `s` to mark spam, `b` to bubble up, `/` to search, and a `⌘K`/`Ctrl+K` command palette. `?` opens the shortcut sheet.
+- **Real HTML mail**: messages are sanitized and laid out with the Blitz renderer from the original Exo, then painted as egui textures. Remote images, trackers and quoted mail are handled by the same pipeline.
+- **Native feel**: eframe/winit window, fastframe app directories, logging and desktop notifications, with cross-platform credential storage (Keychain / Credential Manager / Secret Service, private-file fallback).
+- **Cross-platform**: no `objc2` or `security-framework` in the build. The macOS-only bindings that chained Exo to one platform are gone.
 
-### Setting up your Google client
+Calendar, Contacts, Journal, Habits and Time Tracking are deliberately out of the core mail experience; the SDK surfaces remain available to build on without bloating the client.
 
-1. Create a project in the [Google Cloud console](https://console.cloud.google.com/projectcreate).
-2. Enable the [Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com), the [Google Calendar API](https://console.cloud.google.com/apis/library/calendar-json.googleapis.com) and the [People API](https://console.cloud.google.com/apis/library/people.googleapis.com) for that project.
-3. Open [Google Auth Platform](https://console.cloud.google.com/auth/overview) and click **Get started**. Name the app Exo, pick your address as the support email, choose **External** as the audience and finish.
-4. In [Branding](https://console.cloud.google.com/auth/branding), give your application a name, support email, homepage URL, and privacy policy URL. You can put whatever you want there, as you'll be the only one using the app.
-5. In [Audience](https://console.cloud.google.com/auth/audience), click **Publish app**. (You can keep it in Testing, but Google will sign you out every 7 days, which is annoying).
-6. In [Clients](https://console.cloud.google.com/auth/clients), click **Create client**, choose **Desktop app** as the application type and create it. Download its JSON file.
-7. Move the file into Exo's folder:
+## Build & run
 
 ```sh
-mkdir -p ~/Library/Application\ Support/Exo
-mv ~/Downloads/client_secret_*.json ~/Library/Application\ Support/Exo/google-oauth-client.json
+cargo build --release -p exo
+cargo run -p exo
 ```
 
-8. Open Exo and sign in with Google. Google warns that it hasn't verified the app, which is expected for an app you made yourself. Click **Advanced**, then **Go to Exo (unsafe)**, and allow every permission Exo asks for. Exo asks Google for permission to:
+On first launch, click **Sign in with HEY**. Your browser opens HEY's OAuth page; the app catches the loopback redirect, exchanges the code with PKCE, and stores the tokens on this device.
 
-- read, send and organize your mail
-- change mail settings, such as filters, signatures and the vacation responder
-- manage your calendars
-- read your contacts and your organization's directory
-
-If you untick any of them on Google's screen, sign-in fails.
-
-## Building from source
-
-You'll need Rust 1.98 or later, Xcode 27 and Ruby 4.0 with Bundler.
+## Verify
 
 ```sh
-bundle install
-bundle exec fastlane build
-open target/release/Exo.app
+cargo check --workspace
+cargo test --workspace
 ```
 
-A local build is signed ad hoc, so macOS might ask you for Keychain access after each rebuild.
-You can optionally set a signing identity with `EXO_SIGN_IDENTITY` to avoid that.
+`crates/exo-store/tests/sync.rs` runs the store end-to-end against a local HEY-shaped HTTP server: it checks box sync, posting-to-thread resolution, label loading, thread hydration and the SQLite cache. No account or network access is needed.
 
-Run `cargo test --workspace` to run the tests. They use a mock Gmail server (`crates/gmail-mock`), so they never hit Google's servers.
+Cross-platform builds were checked with `cargo check --target x86_64-pc-windows-gnu -p exo` (passes) and by resolving the Linux dependency graph with `cargo tree --target x86_64-unknown-linux-gnu` — it contains no `objc2`, `security-framework` or Gmail crates. A full Linux cross-check needs an `x86_64-linux-gnu-gcc` toolchain for the TLS dependency's C code, which isn't installed on every build host.
 
-## Use of AI
+## Architecture
 
-Exo was built almost entirely using automated code-generation tools, mainly _Claude Opus 5.5_. No human has reviewed the generated code for correctness or security. I have extensively tested the app and use it as my daily driver, but there might be issues that I haven't encountered yet.
+| Crate | Role |
+| --- | --- |
+| `exo` | eframe app: three-pane HEY UI, command palette, async backend worker |
+| `exo-store` | SQLite cache + HEY SDK sync, reads, actions, outbox |
+| `exo-auth` | HEY OAuth PKCE, token refresh, cross-platform credential storage |
+| `exo-mail` | Blitz HTML email render pipeline and painter |
+| `exo-ui` / `exo-commands` | Exo's design system and keyboard/command layer |
+| `exo-editor` | Rich compose editor (available as a component) |
+| `exo-fonts` | Bundled fonts |
+
+The original `gmail`, `gmail-mock`, Google OAuth, Calendar, and Gmail-store crates and modules have been removed.
 
 ## License
 
-Exo is released under the [MIT License](LICENSE).
-The fonts, icons and photos it bundles, and the code it ports from other projects, are listed with their licenses in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+MIT — see [LICENSE](LICENSE).
