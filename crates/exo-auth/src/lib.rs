@@ -162,7 +162,9 @@ pub fn open_browser(url: &str) -> Result<(), AuthError> {
     let (program, args): (&str, Vec<&str>) = if cfg!(target_os = "macos") {
         ("open", vec![url])
     } else if cfg!(target_os = "windows") {
-        ("cmd", vec!["/C", "start", "", url])
+        // cmd.exe and explorer.exe both truncate the URL at the first `&` in the OAuth query.
+        // The shell's URL handler, invoked directly, passes the whole URL to the default browser.
+        ("rundll32.exe", vec!["url.dll,FileProtocolHandler", url])
     } else {
         ("xdg-open", vec![url])
     };
