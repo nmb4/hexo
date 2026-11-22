@@ -60,6 +60,7 @@ enum View {
 #[derive(Clone, Debug, Default)]
 struct ComposeDraft {
     to: String,
+    bcc: String,
     subject: String,
     body: String,
 }
@@ -123,6 +124,12 @@ pub struct ExoApp {
 
     drawer_open: bool,
     settings_open: bool,
+    /// The frame the settings menu opened, so the click that opened it can't close it.
+    settings_opened_frame: u64,
+    /// Whether the startup palette still waits for the system's appearance.
+    system_theme_pending: bool,
+    /// Frames left to ignore after the settings menu's dismissing click.
+    swallow_clicks: u8,
 
     body: BodyRenderer,
     status: String,
@@ -134,7 +141,8 @@ impl ExoApp {
         // Exo's fonts and icons are optional polish: on Linux/Windows the system fallback is
         // used when a font file isn't available.
         let _ = exo_ui::install(&cc.egui_ctx);
-        let palette = Palette::light();
+        let system_theme = cc.egui_ctx.system_theme();
+        let palette = system_theme.map(palette_for_theme).unwrap_or_else(Palette::light);
         palette.install(&cc.egui_ctx);
 
         let (tx_cmd, rx_cmd) = mpsc::unbounded_channel();
@@ -188,6 +196,9 @@ impl ExoApp {
             reply_text: String::new(),
             drawer_open: false,
             settings_open: false,
+            settings_opened_frame: 0,
+            system_theme_pending: system_theme.is_none(),
+            swallow_clicks: 0,
             body: BodyRenderer::new(),
             status: "Ready".into(),
             error: None,
@@ -340,6 +351,7 @@ impl ExoApp {
                 }
             }
             Action::ToggleTheme => {
+                self.system_theme_pending = false;
                 self.p = if self.p.dark { Palette::light() } else { Palette::dark() };
             }
             Action::SignOut => {
@@ -389,11 +401,12 @@ impl ExoApp {
             self.error = Some("Add at least one recipient".into());
             return;
         }
+        let bcc = split_addresses(&compose.bcc);
         let html = exo_mail::text_to_html(&compose.body);
         if draft {
-            self.send(BackendCommand::SaveDraft { to, subject: compose.subject, body: html });
+            self.send(BackendCommand::SaveDraft { to, bcc, subject: compose.subject, body: html });
         } else {
-            self.send(BackendCommand::Send { to, subject: compose.subject, body: html });
+            self.send(BackendCommand::Send { to, bcc, subject: compose.subject, body: html });
         }
         self.compose = None;
     }
@@ -543,17 +556,23 @@ impl ExoApp {
         }
 
         if let Some(compose) = self.compose.clone() {
-            egui::Window::new("New message")
+            egui::Window::new("Compose")
                 .title_bar(false)
-                .default_width(660.0)
-                .default_height(480.0)
+                .fixed_size(vec2(700.0, 560.0))
                 .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
-                .resizable(true)
+                .resizable(false)
                 .frame(
                     egui::Frame::window(ui.style())
-                        .fill(self.p.panel)
-                        .corner_radius(egui::CornerRadius::same(8))
-                        .stroke(Stroke::new(1.0, self.p.line)),
+                        .inner_margin(egui::Margin::same(0))
+                        .fill(self.p.card)
+                        .corner_radius(egui::CornerRadius::same(10))
+                        .stroke(Stroke::new(1.0, self.p.line))
+                        .shadow(egui::epaint::Shadow {
+                            offset: [0, 24],
+                            blur: 64,
+                            spread: 0,
+                            color: Color32::from_black_alpha(if self.p.dark { 120 } else { 46 }),
+                        }),
                 )
                 .show(&ctx, |ui| self.compose_ui(ui, compose));
         }
@@ -991,7 +1010,7 @@ impl ExoApp {
                         ui,
                         row,
                         self.selected == Some(index),
-                        self.drawer_open,
+                        self.drawer_open || self.settings_open || self.swallow_clicks > 0,
                         &labels,
                         rem,
                         compact,
@@ -1561,7 +1580,7 @@ impl ExoApp {
         }
 
         // Recent conversations with this person, from every box.
-        let mut recent: Vec<(i64, String)> = Vec::new();
+        let mut recent: Vec<(i64, String, String)> = Vec::new();
         let mut seen = HashSet::new();
         if !email.is_empty() {
             for rows in self.rows.values() {
@@ -1570,7 +1589,7 @@ impl ExoApp {
                         && Some(row.topic_id) != current_topic
                         && seen.insert(row.topic_id)
                     {
-                        recent.push((row.topic_id, row.subject.clone()));
+                        recent.push((row.topic_id, row.subject.clone(), row.summary.clone()));
                     }
                 }
             }
@@ -1578,6 +1597,35 @@ impl ExoApp {
         recent.truncate(4);
 
         let mut section_top = rect.top() + 124.0;
+        // An open thread gets a short preview of its latest message, under the address.
+        let latest = self
+            .thread
+            .as_ref()
+            .and_then(|thread| thread.messages.last())
+            .map(|message| preview_text(&message.html, 420))
+            .unwrap_or_default();
+        if !latest.is_empty() {
+            let label_top = rect.top() + 112.0;
+            SECTION.paint_line(
+                ui.painter(),
+                pos2(left, label_top),
+                "LATEST MESSAGE",
+                p.faint,
+                None,
+            );
+            let mut y = label_top + 20.0;
+            for line in DATA.wrap(ui.ctx(), &latest, width).iter().take(3) {
+                DATA.paint_line(
+                    ui.painter(),
+                    pos2(left, y),
+                    line,
+                    p.ink.gamma_multiply(0.55),
+                    Some(width),
+                );
+                y += DATA.line_height;
+            }
+            section_top = y + 16.0;
+        }
         let mut open_topic = None;
         let mut search_email = false;
         if !recent.is_empty() && email != self.identity.email {
@@ -1597,23 +1645,33 @@ impl ExoApp {
             if header_response.clicked() {
                 search_email = true;
             }
-            for (index, (topic, subject)) in recent.iter().enumerate() {
-                let row = Rect::from_min_size(pos2(left, section_top + 25.0 + 24.0 * index as f32), vec2(width, 16.0));
+            for (index, (topic, subject, summary)) in recent.iter().enumerate() {
+                let top = section_top + 25.0 + 40.0 * index as f32;
+                let row = Rect::from_min_size(pos2(left, top), vec2(width, 36.0));
                 let response = ui
                     .interact(row, egui::Id::new(("contact-thread", index)), Sense::click())
                     .on_hover_cursor(CursorIcon::PointingHand);
                 DATA.paint_line(
                     ui.painter(),
-                    row.min,
+                    pos2(left, top + 1.0),
                     subject,
                     if response.hovered() { p.ink.gamma_multiply(0.8) } else { p.ink.gamma_multiply(0.55) },
                     Some(width),
                 );
+                if !summary.is_empty() {
+                    DATA.paint_line(
+                        ui.painter(),
+                        pos2(left, top + 17.0),
+                        summary,
+                        p.ink.gamma_multiply(if response.hovered() { 0.55 } else { 0.42 }),
+                        Some(width),
+                    );
+                }
                 if response.clicked() {
                     open_topic = Some(*topic);
                 }
             }
-            section_top += 16.0 + 8.0 + 24.0 * recent.len() as f32 + 20.0;
+            section_top += 16.0 + 8.0 + 40.0 * recent.len() as f32 + 20.0;
         }
 
         let domain = email
@@ -1685,6 +1743,9 @@ impl ExoApp {
             if gear_response.hovered() || self.settings_open { p.icon_hover } else { p.icon },
         );
         if gear_response.clicked() {
+            if !self.settings_open {
+                self.settings_opened_frame = ui.ctx().cumulative_pass_nr();
+            }
             self.settings_open = !self.settings_open;
         }
 
@@ -1834,6 +1895,9 @@ impl ExoApp {
 
     fn settings_ui(&mut self, ui: &mut Ui, pane: Rect) {
         let p = self.p;
+        // The gear's own click lands in the frame the menu opens, and it's outside the popup.
+        // Ignoring that frame is what keeps the menu from flashing open for one frame.
+        let just_opened = self.settings_opened_frame == ui.ctx().cumulative_pass_nr();
         let width = 180.0;
         let height = 32.0 * 3.0 + 12.0;
         let popup = Rect::from_min_size(
@@ -1880,13 +1944,15 @@ impl ExoApp {
                 1 => self.apply(Action::ToggleTheme),
                 _ => self.apply(Action::SignOut),
             }
-        } else if ui.ctx().input(|i| i.pointer.any_click())
+        } else if !just_opened
+            && ui.ctx().input(|i| i.pointer.any_click())
             && ui
                 .ctx()
                 .input(|i| i.pointer.interact_pos())
                 .is_some_and(|at| !popup.contains(at))
         {
             self.settings_open = false;
+            self.swallow_clicks = 2;
         }
     }
 
@@ -1922,140 +1988,163 @@ impl ExoApp {
 
     fn compose_ui(&mut self, ui: &mut Ui, mut compose: ComposeDraft) {
         let p = self.p;
-        let mut send = false;
-        let mut draft = false;
-        let mut close = false;
-        egui::Frame::new()
-            .fill(p.panel)
-            .inner_margin(egui::Margin {
-                left: 24,
-                right: 24,
-                top: 18,
-                bottom: 18,
-            })
-            .show(ui, |ui| {
-                ui.set_width(612.0);
-                ui.horizontal(|ui| {
-                    NAME.paint_line(ui.painter(), ui.cursor().min, "New message", p.ink, None);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let hit = Rect::from_min_size(
-                            pos2(ui.max_rect().right() - 24.0, ui.cursor().min.y),
-                            Vec2::splat(24.0),
-                        );
-                        let response = ui
-                            .interact(hit, egui::Id::new("compose-close"), Sense::click())
-                            .on_hover_cursor(CursorIcon::PointingHand);
-                        exo_ui::paint_icon(
-                            ui,
-                            "shell/tab-close",
-                            Rect::from_center_size(hit.center(), Vec2::splat(10.0)),
-                            if response.hovered() { p.icon_hover } else { p.icon },
-                        );
-                        if response.clicked() {
-                            close = true;
-                        }
-                    });
-                });
-                ui.add_space(14.0);
+        let rect = ui.max_rect();
+        ui.set_min_size(rect.size());
+        let left = rect.left() + 24.0;
+        let right = rect.right() - 24.0;
+        let header_bottom = rect.top() + 52.0;
+        let footer_top = rect.bottom() - 64.0;
 
-                let label_width = 58.0;
-                ui.horizontal(|ui| {
-                    DATA.paint_line(
-                        ui.painter(),
-                        pos2(ui.cursor().min.x, ui.cursor().min.y + 7.0),
-                        "To",
-                        p.faint,
-                        None,
-                    );
-                    ui.add_space(label_width);
-                    ui.add(
-                        egui::TextEdit::singleline(&mut compose.to)
-                            .frame(egui::Frame::NONE)
-                            .hint_text(RichText::new("Recipients").color(p.faint))
-                            .font(FontId::new(14.0, FontFamily::Proportional))
-                            .text_color(p.ink)
-                            .desired_width(ui.available_width()),
-                    );
-                });
-                ui.painter().hline(
-                    ui.max_rect().x_range(),
-                    ui.cursor().min.y + 2.0,
-                    Stroke::new(1.0, p.line),
-                );
-                ui.add_space(9.0);
-                ui.horizontal(|ui| {
-                    DATA.paint_line(
-                        ui.painter(),
-                        pos2(ui.cursor().min.x, ui.cursor().min.y + 7.0),
-                        "Subject",
-                        p.faint,
-                        None,
-                    );
-                    ui.add_space(label_width);
-                    ui.add(
-                        egui::TextEdit::singleline(&mut compose.subject)
-                            .frame(egui::Frame::NONE)
-                            .hint_text(RichText::new("Subject").color(p.faint))
-                            .font(FontId::new(14.0, FontFamily::Proportional))
-                            .text_color(p.ink)
-                            .desired_width(ui.available_width()),
-                    );
-                });
-                ui.painter().hline(
-                    ui.max_rect().x_range(),
-                    ui.cursor().min.y + 2.0,
-                    Stroke::new(1.0, p.line),
-                );
-                ui.add_space(14.0);
-                ui.add(
-                    egui::TextEdit::multiline(&mut compose.body)
-                        .desired_rows(14)
-                        .hint_text(RichText::new("Write your message…").color(p.faint))
-                        .font(FontId::new(14.0, FontFamily::Proportional))
-                        .text_color(p.ink)
-                        .desired_width(f32::INFINITY)
-                        .frame(egui::Frame::NONE),
-                );
-                ui.add_space(12.0);
-                ui.horizontal(|ui| {
-                    if ui.add(
-                        egui::Button::new(RichText::new("Send").size(12.5).color(p.accent_ink))
-                            .fill(p.accent)
-                            .min_size(Vec2::new(90.0, 32.0)),
-                    ).clicked() {
-                        send = true;
-                    }
-                    if ui.button(RichText::new("Save draft").size(12.0).color(p.ink)).clicked() {
-                        draft = true;
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(RichText::new("Discard").size(11.5).color(p.faint)).clicked() {
-                            close = true;
-                        }
-                    });
-                });
-            });
-        if close {
+        // Header: the draft's title and a quiet close button.
+        NAME.paint_line(ui.painter(), pos2(left, rect.top() + 14.0), "New message", p.ink, None);
+        let close = Rect::from_min_size(
+            pos2(right - 24.0, rect.top() + 12.0),
+            vec2(28.0, 28.0),
+        );
+        let close_response = ui
+            .interact(close, egui::Id::new("compose-close"), Sense::click())
+            .on_hover_cursor(CursorIcon::PointingHand)
+            .on_hover_text("Discard");
+        exo_ui::paint_icon(
+            ui,
+            "shell/tab-close",
+            Rect::from_center_size(close.center(), Vec2::splat(10.0)),
+            if close_response.hovered() { p.icon_hover } else { p.icon },
+        );
+        let mut discard = close_response.clicked();
+        let header = Rect::from_min_max(rect.min, pos2(right, header_bottom - 1.0));
+        let header_response = ui.interact(
+            header,
+            egui::Id::new("compose-drag"),
+            Sense::click_and_drag(),
+        );
+        if header_response.drag_started() {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
+        ui.painter().hline(
+            rect.x_range(),
+            header_bottom - 0.5,
+            Stroke::new(1.0, p.line),
+        );
+
+        // The recipient and subject rows: Exo's 50px label column, a 44px line and a hairline.
+        let label_width = 66.0;
+        let field_height = 44.0;
+        let mut row_top = header_bottom + 8.0;
+        let field = |ui: &mut Ui, top: f32, label: &str, text: &mut String, hint: &str, id: &str| {
+            let value = Rect::from_min_max(
+                pos2(left + label_width, top + 7.0),
+                pos2(right, top + field_height - 5.0),
+            );
+            BOLD.paint_line(
+                ui.painter(),
+                pos2(left, top + 14.0),
+                label,
+                p.muted,
+                None,
+            );
+            let response = ui.put(
+                value,
+                egui::TextEdit::singleline(text)
+                    .id(egui::Id::new(id))
+                    .frame(egui::Frame::NONE)
+                    .hint_text(RichText::new(hint).size(14.0).color(p.faint))
+                    .font(FontId::new(14.0, FontFamily::Proportional))
+                    .text_color(p.ink)
+                    .desired_width(value.width()),
+            );
+            ui.painter().hline(
+                rect.x_range(),
+                top + field_height - 0.5,
+                Stroke::new(1.0, p.line),
+            );
+            response
+        };
+
+        let to_response = field(ui, row_top, "To", &mut compose.to, "Recipients", "compose-to");
+        if self.compose_focus {
+            to_response.request_focus();
+            self.compose_focus = false;
+        }
+        row_top += field_height;
+        field(ui, row_top, "Subject", &mut compose.subject, "Subject", "compose-subject");
+        row_top += field_height;
+        field(ui, row_top, "Bcc", &mut compose.bcc, "Bcc recipients", "compose-bcc");
+
+        // The body: the same Exo face as a thread body, with room to breathe.
+        let body_top = row_top + field_height + 14.0;
+        let body = Rect::from_min_max(
+            pos2(left, body_top),
+            pos2(right, footer_top - 10.0),
+        );
+        ui.put(
+            body,
+            egui::TextEdit::multiline(&mut compose.body)
+                .id(egui::Id::new("compose-body"))
+                .desired_rows(12)
+                .hint_text(RichText::new("Write your message…").size(16.0).color(p.faint))
+                .font(FontId::new(16.0, FontFamily::Proportional))
+                .text_color(p.ink)
+                .desired_width(body.width())
+                .frame(egui::Frame::NONE),
+        );
+
+        // Footer: a real Exo action bar, not stock widgets.
+        ui.painter().hline(
+            rect.x_range(),
+            footer_top - 0.5,
+            Stroke::new(1.0, p.line),
+        );
+        let button_top = footer_top + 16.0;
+        let send = Rect::from_min_size(pos2(left, button_top), vec2(88.0, 32.0));
+        let save = Rect::from_min_size(pos2(send.right() + 10.0, button_top), vec2(104.0, 32.0));
+        let mut send_clicked = false;
+        let mut draft_clicked = false;
+        if primary_button(ui, egui::Id::new("compose-send"), send, "Send", p) {
+            send_clicked = true;
+        }
+        if secondary_button(ui, egui::Id::new("compose-save"), save, "Save draft", p) {
+            draft_clicked = true;
+        }
+        let discard_rect = Rect::from_min_size(
+            pos2(right - 84.0, button_top),
+            vec2(84.0, 32.0),
+        );
+        if secondary_button(ui, egui::Id::new("compose-discard"), discard_rect, "Discard", p) {
+            discard = true;
+        }
+        // The keyboard hint, in the quiet ink the rest of Exo uses.
+        DATA.paint_line(
+            ui.painter(),
+            pos2(save.right() + 18.0, button_top + 8.0),
+            "⌘↵ to send",
+            p.faint,
+            None,
+        );
+
+        if discard {
             self.compose = None;
             return;
         }
         self.compose = Some(compose);
-        if send || draft {
+        if send_clicked || draft_clicked {
             let current = self.compose.clone().unwrap();
             let to = split_addresses(&current.to);
             if to.is_empty() {
                 self.error = Some("Add at least one recipient".into());
                 return;
             }
-            let command = if send {
+            let command = if send_clicked {
                 BackendCommand::Send {
                     to,
+                    bcc: split_addresses(&current.bcc),
                     subject: current.subject,
                     body: exo_mail::text_to_html(&current.body),
                 }
             } else {
                 BackendCommand::SaveDraft {
                     to,
+                    bcc: split_addresses(&current.bcc),
                     subject: current.subject,
                     body: exo_mail::text_to_html(&current.body),
                 }
@@ -2269,6 +2358,135 @@ fn is_popular_domain(domain: &str) -> bool {
 // Small helpers and the command loop.
 // -------------------------------------------------------------------------------------------
 
+fn primary_button(ui: &Ui, id: egui::Id, rect: Rect, label: &str, p: Palette) -> bool {
+    let response = ui
+        .interact(rect, id, Sense::click())
+        .on_hover_cursor(CursorIcon::PointingHand);
+    let fill = if response.hovered() {
+        p.accent.gamma_multiply(0.9)
+    } else {
+        p.accent
+    };
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same(4), fill);
+    let galley = BOLD.single_line(ui.painter(), label, p.accent_ink, None);
+    let at = pos2(
+        rect.center().x - galley.size().x / 2.0,
+        rect.center().y - 8.0,
+    );
+    exo_ui::paint_text(ui.painter(), at, galley, &BOLD);
+    response.clicked()
+}
+
+fn secondary_button(ui: &Ui, id: egui::Id, rect: Rect, label: &str, p: Palette) -> bool {
+    let response = ui
+        .interact(rect, id, Sense::click())
+        .on_hover_cursor(CursorIcon::PointingHand);
+    if response.hovered() {
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::same(4), p.hover);
+    }
+    ui.painter().rect_stroke(
+        rect,
+        egui::CornerRadius::same(4),
+        Stroke::new(1.0, p.line),
+        egui::StrokeKind::Inside,
+    );
+    let galley = BOLD.single_line(ui.painter(), label, p.ink, None);
+    let at = pos2(
+        rect.center().x - galley.size().x / 2.0,
+        rect.center().y - 8.0,
+    );
+    exo_ui::paint_text(ui.painter(), at, galley, &BOLD);
+    response.clicked()
+}
+
+/// The readable text of an HTML body, for the contact pane's preview.
+fn preview_text(html: &str, max_chars: usize) -> String {
+    let mut text = String::with_capacity(html.len().min(max_chars * 4));
+    let mut tag = String::new();
+    let mut in_tag = false;
+    let mut chars = html.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '<' => {
+                in_tag = true;
+                tag.clear();
+            }
+            '>' if in_tag => {
+                in_tag = false;
+                let name = tag.trim().to_ascii_lowercase();
+                if name.starts_with("br")
+                    || name.starts_with("hr")
+                    || name.starts_with("/p")
+                    || name.starts_with("/div")
+                    || name.starts_with("/li")
+                    || name.starts_with("/tr")
+                    || name.starts_with("/td")
+                    || name.starts_with("/h")
+                    || name.starts_with("/blockquote")
+                {
+                    text.push(' ');
+                }
+            }
+            _ if in_tag => tag.push(ch),
+            '&' => {
+                let mut entity = String::from("&");
+                for _ in 0..10 {
+                    let Some(next) = chars.next() else { break };
+                    entity.push(next);
+                    if next == ';' {
+                        break;
+                    }
+                }
+                let decoded = match entity.as_str() {
+                    "&nbsp;" => Some(" "),
+                    "&amp;" => Some("&"),
+                    "&lt;" => Some("<"),
+                    "&gt;" => Some(">"),
+                    "&quot;" => Some("\""),
+                    "&#39;" | "&apos;" => Some("'"),
+                    _ => None,
+                };
+                if let Some(decoded) = decoded {
+                    text.push_str(decoded);
+                } else {
+                    text.push_str(&entity);
+                }
+            }
+            _ => text.push(ch),
+        }
+    }
+    let mut collapsed = String::with_capacity(text.len());
+    let mut spaced = false;
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            if !spaced {
+                collapsed.push(' ');
+                spaced = true;
+            }
+        } else {
+            collapsed.push(ch);
+            spaced = false;
+        }
+    }
+    let trimmed = collapsed.trim();
+    if trimmed.chars().count() > max_chars {
+        let mut cut: String = trimmed.chars().take(max_chars.saturating_sub(1)).collect();
+        cut.push('…');
+        cut
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn palette_for_theme(theme: egui::Theme) -> Palette {
+    match theme {
+        egui::Theme::Dark => Palette::dark(),
+        egui::Theme::Light => Palette::light(),
+    }
+}
+
 fn split_addresses(value: &str) -> Vec<String> {
     value
         .split([',', ';', '\n'])
@@ -2291,6 +2509,12 @@ impl eframe::App for ExoApp {
         }
 
         let ctx = ui.ctx().clone();
+        if self.system_theme_pending
+            && let Some(theme) = ctx.system_theme()
+        {
+            self.p = palette_for_theme(theme);
+            self.system_theme_pending = false;
+        }
         self.p.install(&ctx);
         self.pump_events();
 
@@ -2317,6 +2541,7 @@ impl eframe::App for ExoApp {
         if let Some(error) = self.error.take() {
             self.commands.toast(Toast::new(error));
         }
+        self.swallow_clicks = self.swallow_clicks.saturating_sub(1);
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
     }
 }
@@ -2349,5 +2574,21 @@ mod tests {
     fn popular_domains_are_not_links() {
         assert!(is_popular_domain("hey.com"));
         assert!(!is_popular_domain("brightmoor.co"));
+    }
+
+    #[test]
+    fn picks_the_system_palette_once() {
+        assert!(palette_for_theme(egui::Theme::Dark).dark);
+        assert!(!palette_for_theme(egui::Theme::Light).dark);
+    }
+
+    #[test]
+    fn previews_html_as_plain_text() {
+        assert_eq!(
+            preview_text("<p>Hello&nbsp;<b>there</b>,</p><p>second line</p>", 80),
+            "Hello there, second line"
+        );
+        assert_eq!(preview_text("<p>one</p><p>two</p>", 5), "one …");
+        assert_eq!(preview_text("", 80), "");
     }
 }

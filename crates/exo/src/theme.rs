@@ -119,6 +119,7 @@ impl Palette {
 
     pub fn install(self, ctx: &egui::Context) {
         exo_ui::set_theme(ctx, self.exo_theme());
+        ctx.set_theme(if self.dark { egui::Theme::Dark } else { egui::Theme::Light });
         let mut visuals = if self.dark {
             egui::Visuals::dark()
         } else {

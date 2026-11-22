@@ -664,13 +664,20 @@ impl Store {
             .collect())
     }
 
-    pub async fn send(&self, to: &[String], subject: &str, html: &str) -> Result<(), StoreError> {
+    pub async fn send(
+        &self,
+        to: &[String],
+        bcc: &[String],
+        subject: &str,
+        html: &str,
+    ) -> Result<(), StoreError> {
         self.client
             .messages()
             .send(&MessageContent {
                 subject: subject.to_string(),
                 content: html.to_string(),
                 to: to.to_vec(),
+                bcc: bcc.to_vec(),
                 ..MessageContent::default()
             })
             .await?;
@@ -719,6 +726,7 @@ impl Store {
     pub async fn save_draft(
         &self,
         to: &[String],
+        bcc: &[String],
         subject: &str,
         html: &str,
     ) -> Result<i64, StoreError> {
@@ -729,6 +737,7 @@ impl Store {
                 subject: subject.to_string(),
                 content: html.to_string(),
                 to: to.to_vec(),
+                bcc: bcc.to_vec(),
                 ..hey_sdk::services::DraftContent::default()
             })
             .await?;

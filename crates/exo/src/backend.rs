@@ -32,6 +32,7 @@ pub enum Command {
     Search(String),
     Send {
         to: Vec<String>,
+        bcc: Vec<String>,
         subject: String,
         body: String,
     },
@@ -41,6 +42,7 @@ pub enum Command {
     },
     SaveDraft {
         to: Vec<String>,
+        bcc: Vec<String>,
         subject: String,
         body: String,
     },
@@ -293,9 +295,9 @@ pub async fn run(
                             }
                         }
                     }
-                    Command::Send { to, subject, body } => {
+                    Command::Send { to, bcc, subject, body } => {
                         if let Some(s) = &store {
-                            match s.send(&to, &subject, &body).await {
+                            match s.send(&to, &bcc, &subject, &body).await {
                                 Ok(()) => { let _ = event.send(Event::Done { message: "Message sent".into() }); }
                                 Err(e) => error(&event, format!("Could not send: {e}")),
                             }
@@ -309,9 +311,9 @@ pub async fn run(
                             }
                         }
                     }
-                    Command::SaveDraft { to, subject, body } => {
+                    Command::SaveDraft { to, bcc, subject, body } => {
                         if let Some(s) = &store {
-                            match s.save_draft(&to, &subject, &body).await {
+                            match s.save_draft(&to, &bcc, &subject, &body).await {
                                 Ok(_) => { let _ = event.send(Event::Done { message: "Draft saved".into() }); }
                                 Err(e) => error(&event, format!("Could not save draft: {e}")),
                             }
