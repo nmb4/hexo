@@ -1732,6 +1732,7 @@ dependencies = [
  "fastframe-notifications",
  "hey-sdk",
  "image",
+ "jiff 0.2.46",
  "log",
  "serde",
  "serde_json",
