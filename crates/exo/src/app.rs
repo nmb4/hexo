@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
-use egui::{Align, Color32, FontId, Layout, RichText, ScrollArea, Sense, Vec2};
+use egui::{Align, Align2, Color32, FontId, Layout, RichText, ScrollArea, Sense, Vec2};
 use exo_commands::{Command, Commands, Region, Toast};
 use exo_store::{
     BoxInfo, Identity, Label, ScreenerItem, SearchHit, Thread, ThreadRow,
@@ -408,19 +408,25 @@ impl ExoApp {
     fn paint_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
 
-        // Sign-in screen.
         if !self.signed_in {
             egui::CentralPanel::default_margins().show(ui, |ui| self.sign_in_ui(ui));
             return;
         }
 
-        // Top bar.
         egui::Panel::top("top")
-            .default_size(52.0)
+            .default_size(58.0)
+            .min_size(58.0)
+            .max_size(58.0)
             .resizable(false)
             .show(ui, |ui| self.top_bar(ui));
 
-        // Three panes.
+        egui::Panel::left("rail")
+            .default_size(58.0)
+            .min_size(58.0)
+            .max_size(58.0)
+            .resizable(false)
+            .show(ui, |ui| self.rail(ui));
+
         egui::Panel::left("sidebar")
             .default_size(212.0)
             .min_size(212.0)
@@ -430,19 +436,24 @@ impl ExoApp {
 
         match self.view {
             View::Screener => {
-                egui::CentralPanel::default_margins().show(ui, |ui| self.screener_ui(ui));
+                egui::CentralPanel::default_margins()
+                    .frame(egui::Frame::new().fill(self.p.window))
+                    .show(ui, |ui| self.screener_ui(ui));
             }
             View::Search => {
-                egui::CentralPanel::default_margins().show(ui, |ui| self.search_ui(ui));
+                egui::CentralPanel::default_margins()
+                    .frame(egui::Frame::new().fill(self.p.window))
+                    .show(ui, |ui| self.search_ui(ui));
             }
             View::Mail => {
                 egui::Panel::left("list")
-                    .default_size(360.0)
-                    .min_size(360.0)
-                    .max_size(360.0)
-                    .resizable(false)
+                    .default_size(600.0)
+                    .min_size(430.0)
+                    .resizable(true)
                     .show(ui, |ui| self.list_ui(ui));
-                egui::CentralPanel::no_frame().show(ui, |ui| self.reader_ui(ui));
+                egui::CentralPanel::default_margins()
+                    .frame(egui::Frame::new().fill(self.p.window))
+                    .show(ui, |ui| self.reader_ui(ui));
             }
         }
 
@@ -450,8 +461,8 @@ impl ExoApp {
             let mut open = true;
             egui::Window::new("New message")
                 .open(&mut open)
-                .default_width(620.0)
-                .default_height(480.0)
+                .default_width(660.0)
+                .default_height(520.0)
                 .resizable(true)
                 .show(&ctx, |ui| self.compose_ui(ui, compose));
             if !open {
@@ -462,416 +473,810 @@ impl ExoApp {
 
     fn sign_in_ui(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
-            ui.add_space(ui.available_height() / 3.0);
-            ui.label(RichText::new("Exo").size(44.0).color(self.p.ink).strong());
-            ui.label(RichText::new("for HEY").size(20.0).color(self.p.muted));
-            ui.add_space(28.0);
-            ui.label(RichText::new("A fast, keyboard-first home for your mail.").size(15.0).color(self.p.muted));
-            ui.add_space(24.0);
+            ui.add_space((ui.available_height() / 2.0 - 130.0).max(40.0));
+            ui.label(RichText::new("EXO").size(13.0).strong().color(self.p.faint));
+            ui.add_space(10.0);
+            ui.label(RichText::new("Your mail, at the speed of thought.").size(34.0).strong().color(self.p.ink));
+            ui.add_space(10.0);
+            ui.label(RichText::new("A native client for HEY — local-first, keyboard-driven, and quietly fast.").size(14.0).color(self.p.muted));
+            ui.add_space(32.0);
             let button = egui::Button::new(
                 RichText::new(if self.starting { "Waiting for HEY…" } else { "Sign in with HEY" })
                     .size(15.0)
+                    .strong()
                     .color(self.p.accent_ink),
             )
             .fill(self.p.accent)
-            .min_size(Vec2::new(220.0, 42.0));
+            .min_size(Vec2::new(240.0, 46.0));
             if ui.add(button).clicked() {
                 self.starting = true;
                 self.send(BackendCommand::SignIn);
             }
-            ui.add_space(14.0);
+            ui.add_space(16.0);
             ui.label(RichText::new("Your browser opens to approve access. Tokens stay on this device.").size(12.0).color(self.p.faint));
         });
     }
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
-        ui.set_min_height(52.0);
-        ui.horizontal(|ui| {
-            ui.add_space(14.0);
-            ui.label(RichText::new("EXO").size(17.0).strong().color(self.p.ink));
-            ui.label(RichText::new("for HEY").size(12.0).color(self.p.muted));
-            ui.add_space(18.0);
-
-            let search = egui::TextEdit::singleline(&mut self.search_text)
-                .hint_text("Search mail  /")
-                .desired_width(300.0)
-                .frame(egui::Frame::NONE);
-            let response = ui.add(search);
-            if response.clicked() {
-                self.search_focus = true;
-            }
-            if self.search_focus {
-                response.request_focus();
-                self.search_focus = false;
-            }
-            if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                let query = self.search_text.clone();
-                self.send(BackendCommand::Search(query));
-            }
-            ui.add_space(10.0);
-            if ui.button("⌘K").clicked() {
-                self.commands.open_palette(None);
-            }
-            ui.add_space(10.0);
-            ui.label(RichText::new(&self.status).size(12.0).color(self.p.faint));
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let name = if self.identity.name.is_empty() {
-                    self.identity.email.clone()
+        ui.set_min_height(56.0);
+        egui::Frame::new().fill(self.p.panel).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.add_space(20.0);
+                ui.label(RichText::new("EXO").size(12.0).strong().color(self.p.muted));
+                ui.label(RichText::new("/").size(12.0).color(self.p.faint));
+                let title = if self.view == View::Mail {
+                    self.box_name(&self.selected_box)
+                } else if self.view == View::Screener {
+                    "The Screener".to_string()
                 } else {
-                    self.identity.name.clone()
+                    "Search".to_string()
                 };
-                ui.label(RichText::new(name).size(12.0).color(self.p.muted));
+                ui.label(RichText::new(title).size(14.0).strong().color(self.p.ink));
+                if self.view == View::Mail && self.unread(&self.selected_box) > 0 {
+                    ui.label(
+                        RichText::new(self.unread(&self.selected_box).to_string())
+                            .size(11.0)
+                            .strong()
+                            .color(self.p.muted),
+                    );
+                }
+
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.add_space(20.0);
+                    let name = if self.identity.name.is_empty() {
+                        self.identity.email.clone()
+                    } else {
+                        self.identity.name.clone()
+                    };
+                    let account_initials = initials(&name);
+                    ui.label(RichText::new(name).size(12.0).color(self.p.muted));
+                    ui_avatar(ui, &account_initials, "", self.p, 26.0);
+                    ui.add_space(14.0);
+                    if ui.button(RichText::new("Compose").size(12.0).color(self.p.ink)).clicked() {
+                        self.compose = Some(ComposeDraft::default());
+                        self.compose_focus = true;
+                    }
+                    if ui.button(RichText::new("Search").size(12.0).color(self.p.ink)).clicked() {
+                        self.search_focus = true;
+                        self.commands.open_palette(None);
+                    }
+                    ui.add_space(6.0);
+                });
+            });
+        });
+        ui.add(egui::Separator::default().spacing(0.0));
+    }
+
+    fn rail(&mut self, ui: &mut egui::Ui) {
+        egui::Frame::new().fill(self.p.panel).show(ui, |ui| {
+            ui.add_space(14.0);
+            ui.vertical_centered(|ui| {
+                for (kind, glyph) in [
+                    ("imbox", "I"),
+                    ("feedbox", "F"),
+                    ("laterbox", "L"),
+                    ("asidebox", "A"),
+                    ("trailbox", "T"),
+                ] {
+                    let active = self.view == View::Mail && self.selected_box == kind;
+                    let size = 38.0;
+                    let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
+                    if active {
+                        ui.painter()
+                            .rect_filled(rect, 9.0, self.p.selected);
+                        ui.painter().rect_filled(
+                            egui::Rect::from_min_size(rect.left_top(), egui::vec2(3.0, rect.height())),
+                            0.0,
+                            Color32::from_rgb(64, 132, 226),
+                        );
+                    } else if response.hovered() {
+                        ui.painter().rect_filled(rect, 9.0, self.p.hover);
+                    }
+                    ui.painter().text(
+                        rect.center(),
+                        Align2::CENTER_CENTER,
+                        glyph,
+                        FontId::proportional(17.0),
+                        if active { self.p.ink } else { self.p.muted },
+                    );
+                    let response = response.on_hover_text(self.box_name(kind));
+                    if response.clicked() {
+                        self.select_box(kind);
+                    }
+                    ui.add_space(7.0);
+                }
+                ui.add_space(8.0);
+                let (rect, response) = ui.allocate_exact_size(Vec2::splat(38.0), Sense::click());
+                if self.view == View::Screener {
+                    ui.painter().rect_filled(rect, 9.0, self.p.selected);
+                } else if response.hovered() {
+                    ui.painter().rect_filled(rect, 9.0, self.p.hover);
+                }
+                ui.painter().text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    "S",
+                    FontId::proportional(17.0),
+                    if self.view == View::Screener { self.p.ink } else { self.p.muted },
+                );
+                if response.clicked() {
+                    self.view = View::Screener;
+                }
             });
         });
         ui.add(egui::Separator::default().spacing(0.0));
     }
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(14.0);
-        ui.label(RichText::new("MAILBOXES").size(10.5).strong().color(self.p.faint));
-        ui.add_space(6.0);
-        for kind in BOX_ORDER {
-            self.box_button(ui, kind);
-        }
-        ui.add_space(16.0);
-        ui.label(RichText::new("LABELS").size(10.5).strong().color(self.p.faint));
-        ui.add_space(6.0);
-        for label in &self.labels {
-            let id = label.id;
-            let name = label.name.clone();
-            if ui.add(egui::Button::new(RichText::new(name).size(13.0).color(self.p.ink)).frame(false)).clicked() {
-                self.status = format!("Select a thread, then use ⌘K to apply “{id}”");
+        egui::Frame::new().fill(self.p.panel).show(ui, |ui| {
+            ui.add_space(18.0);
+            ui.horizontal(|ui| {
+                ui.add_space(18.0);
+                ui.label(RichText::new("MAILBOXES").size(10.0).strong().color(self.p.faint));
+            });
+            ui.add_space(8.0);
+            for kind in BOX_ORDER {
+                self.box_button(ui, kind);
             }
-        }
-        ui.add_space(16.0);
-        ui.label(RichText::new("HEY").size(10.5).strong().color(self.p.faint));
-        ui.add_space(6.0);
-        let screener_count = self.screener.len();
-        if ui
-            .add(
-                egui::Button::new(
-                    RichText::new(format!("The Screener   {}", if screener_count > 0 { format!("({screener_count})") } else { String::new() }))
-                        .size(13.0)
-                        .color(self.p.ink),
-                )
-                .frame(false),
-            )
-            .clicked()
-        {
-            self.view = View::Screener;
-        }
-        ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
-            ui.add_space(10.0);
-            if ui.add(egui::Button::new(RichText::new("Refresh  ↻").size(12.0).color(self.p.muted)).frame(false)).clicked() {
-                self.send(BackendCommand::Refresh);
-            }
-            if ui.add(egui::Button::new(RichText::new("Sign out").size(12.0).color(self.p.muted)).frame(false)).clicked() {
-                self.send(BackendCommand::SignOut);
-                self.signed_in = false;
-            }
-            if ui.add(egui::Button::new(RichText::new("Compose  ✎").size(12.0).color(self.p.muted)).frame(false)).clicked() {
-                self.compose = Some(ComposeDraft::default());
+
+            ui.add_space(20.0);
+            ui.horizontal(|ui| {
+                ui.add_space(18.0);
+                ui.label(RichText::new("LABELS").size(10.0).strong().color(self.p.faint));
+            });
+            ui.add_space(6.0);
+            for label in &self.labels {
+                let (rect, response) = ui.allocate_exact_size(
+                    Vec2::new(ui.available_width() - 14.0, 28.0),
+                    Sense::click(),
+                );
+                if response.hovered() {
+                    ui.painter().rect_filled(rect, 6.0, self.p.hover);
+                }
+                ui.painter().circle_filled(
+                    egui::pos2(rect.left() + 13.0, rect.center().y),
+                    3.5,
+                    Color32::from_rgb(126, 176, 132),
+                );
+                ui.painter().text(
+                    egui::pos2(rect.left() + 26.0, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    &label.name,
+                    FontId::proportional(12.5),
+                    self.p.ink,
+                );
+                if response.clicked() {
+                    self.status = format!("Select a thread, then use ⌘K to apply “{}”", label.name);
+                }
             }
         });
+
+        ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
+            egui::Frame::new().fill(self.p.panel).show(ui, |ui| {
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(16.0);
+                    if ui.add(egui::Button::new(RichText::new("Compose").size(12.5).color(self.p.muted)).frame(false)).clicked() {
+                        self.compose = Some(ComposeDraft::default());
+                    }
+                });
+                ui.add_space(2.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(16.0);
+                    if ui.add(egui::Button::new(RichText::new("Refresh").size(12.5).color(self.p.muted)).frame(false)).clicked() {
+                        self.send(BackendCommand::Refresh);
+                    }
+                    ui.add_space(8.0);
+                    if ui.add(egui::Button::new(RichText::new("Sign out").size(11.5).color(self.p.faint)).frame(false)).clicked() {
+                        self.send(BackendCommand::SignOut);
+                        self.signed_in = false;
+                    }
+                });
+                ui.add_space(10.0);
+            });
+        });
+        ui.add(egui::Separator::default().spacing(0.0));
     }
 
     fn box_button(&mut self, ui: &mut egui::Ui, kind: &str) {
         let active = self.view == View::Mail && self.selected_box == kind;
         let unread = self.unread(kind);
         let name = self.box_name(kind);
-        let text = if unread > 0 {
-            RichText::new(format!("{name}      {unread}"))
-                .size(13.5)
-                .color(self.p.ink)
-                .strong()
-        } else {
-            RichText::new(name).size(13.5).color(self.p.ink)
-        };
-        let button = egui::Button::new(text)
-            .frame(false)
-            .fill(if active { self.p.selected } else { Color32::TRANSPARENT });
-        if ui.add(button).clicked() {
+        let height = 32.0;
+        let rect = ui.available_rect_before_wrap();
+        let rect = egui::Rect::from_min_size(rect.min, Vec2::new(rect.width(), height));
+        let response = ui.interact(rect, egui::Id::new(("box", kind)), Sense::click());
+        if active {
+            ui.painter().rect_filled(rect, 6.0, self.p.selected);
+            ui.painter().rect_filled(
+                egui::Rect::from_min_size(rect.left_top(), egui::vec2(3.0, rect.height())),
+                0.0,
+                Color32::from_rgb(64, 132, 226),
+            );
+        } else if response.hovered() {
+            ui.painter().rect_filled(rect, 6.0, self.p.hover);
+        }
+        let x = rect.left() + 18.0;
+        ui.painter().text(
+            egui::pos2(x, rect.center().y),
+            Align2::LEFT_CENTER,
+            &name,
+            FontId::proportional(12.8),
+            if active || unread > 0 { self.p.ink } else { self.p.muted },
+        );
+        if unread > 0 {
+            let label = unread.to_string();
+            ui.painter().text(
+                egui::pos2(rect.right() - 16.0, rect.center().y),
+                Align2::RIGHT_CENTER,
+                &label,
+                FontId::proportional(11.0),
+                if active { self.p.ink } else { self.p.muted },
+            );
+        }
+        ui.allocate_rect(rect, Sense::hover());
+        if response.clicked() {
             self.select_box(kind);
         }
     }
 
     fn list_ui(&mut self, ui: &mut egui::Ui) {
-        let name = self.box_name(&self.selected_box);
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            ui.add_space(14.0);
-            ui.label(RichText::new(&name).size(18.0).strong().color(self.p.ink));
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.label(RichText::new(format!("{}", self.current_rows().len())).size(11.0).color(self.p.faint));
+        egui::Frame::new().fill(self.p.list).show(ui, |ui| {
+            ui.add_space(16.0);
+            ui.horizontal(|ui| {
+                ui.add_space(20.0);
+                ui.label(RichText::new(self.box_name(&self.selected_box)).size(20.0).strong().color(self.p.ink));
+                ui.add_space(6.0);
+                ui.label(RichText::new(self.current_rows().len().to_string()).size(12.0).color(self.p.faint));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.add_space(20.0);
+                    if ui.button(RichText::new("⌕ Search").size(11.5).color(self.p.muted)).clicked() {
+                        self.search_focus = true;
+                    }
+                });
             });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.add_space(20.0);
+                let search = egui::TextEdit::singleline(&mut self.search_text)
+                    .hint_text("Search all mail")
+                    .frame(egui::Frame::NONE)
+                    .desired_width(ui.available_width() - 40.0);
+                let response = ui.add(search);
+                if self.search_focus {
+                    response.request_focus();
+                    self.search_focus = false;
+                }
+                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    let query = self.search_text.clone();
+                    self.send(BackendCommand::Search(query));
+                }
+            });
+            ui.add_space(8.0);
+            ui.add(egui::Separator::default().spacing(0.0));
         });
-        ui.add_space(8.0);
-        ui.add(egui::Separator::default().spacing(0.0));
 
         let rows = self.current_rows().to_vec();
+        let mut last_group = String::new();
         ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for (index, row) in rows.iter().enumerate() {
-                let selected = self.selected == Some(index);
+                let group = group_label(row.created_at.as_deref());
+                if group != last_group {
+                    ui.add_space(14.0);
+                    ui.horizontal(|ui| {
+                        ui.add_space(20.0);
+                        ui.label(RichText::new(&group).size(10.5).strong().color(self.p.faint));
+                    });
+                    ui.add_space(4.0);
+                    last_group = group;
+                }
+
+                let height = 46.0;
+                let full = ui.available_rect_before_wrap();
+                let rect = egui::Rect::from_min_size(full.min, Vec2::new(full.width(), height));
                 let response = ui.interact(
-                    ui.available_rect_before_wrap(),
+                    rect,
                     egui::Id::new(("row", &self.selected_box, row.posting_id)),
                     Sense::click(),
                 );
-                let background = if selected {
-                    self.p.selected
-                } else if response.hovered() {
-                    self.p.hover
-                } else {
-                    Color32::TRANSPARENT
-                };
-                egui::Frame::new()
-                    .fill(background)
-                    .inner_margin(egui::Margin { left: 12, right: 12, top: 10, bottom: 10 })
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            avatar(ui, &row.sender_initials, &row.avatar_color, self.p);
-                            ui.add_space(9.0);
-                            ui.vertical(|ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::new(row.display_name()).size(13.0).color(self.p.ink).strong());
-                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        ui.label(RichText::new(short_date(row.created_at.as_deref())).size(10.5).color(self.p.faint));
-                                    });
-                                });
-                                ui.label(RichText::new(&row.subject).size(12.5).color(if row.seen { self.p.muted } else { self.p.ink }));
-                                ui.label(RichText::new(&row.summary).size(11.0).color(self.p.faint).line_height(Some(1.2)));
-                            });
-                        });
-                    });
-                if !row.seen {
-                    let dot = ui.painter().circle_filled(
-                        egui::pos2(response.rect.left() + 4.0, response.rect.center().y),
-                        3.0,
-                        self.p.accent,
+                let selected = self.selected == Some(index);
+                if selected {
+                    ui.painter().rect_filled(rect, 0.0, self.p.selected);
+                    ui.painter().rect_filled(
+                        egui::Rect::from_min_size(rect.left_top(), egui::vec2(3.0, height)),
+                        0.0,
+                        Color32::from_rgb(64, 132, 226),
                     );
-                    let _ = dot;
+                } else if response.hovered() {
+                    ui.painter().rect_filled(rect, 0.0, self.p.hover);
                 }
+
+                let mut x = rect.left() + 14.0;
+                if !row.seen {
+                    ui.painter().circle_filled(
+                        egui::pos2(x + 3.0, rect.center().y),
+                        3.5,
+                        Color32::from_rgb(64, 132, 226),
+                    );
+                }
+                x += 14.0;
+
+                let sender_width = 132.0;
+                ui.painter().text(
+                    egui::pos2(x, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    clip(&row.display_name(), 22),
+                    FontId::proportional(12.6),
+                    if row.seen { self.p.muted } else { self.p.ink },
+                );
+                x += sender_width;
+
+                for label_id in &row.label_ids {
+                    let name = self
+                        .labels
+                        .iter()
+                        .find(|l| l.id == *label_id)
+                        .map(|l| l.name.clone())
+                        .unwrap_or_default();
+                    if name.is_empty() {
+                        continue;
+                    }
+                    let chip = egui::Rect::from_min_size(
+                        egui::pos2(x, rect.center().y - 9.0),
+                        Vec2::new((name.chars().count().min(14) as f32) * 6.4 + 12.0, 18.0),
+                    );
+                    ui.painter().rect_filled(chip, 4.0, Color32::from_rgb(226, 236, 226));
+                    ui.painter().text(
+                        chip.center(),
+                        Align2::CENTER_CENTER,
+                        clip(&name, 14),
+                        FontId::proportional(9.5),
+                        Color32::from_rgb(64, 104, 70),
+                    );
+                    x += chip.width() + 5.0;
+                }
+
+                ui.painter().text(
+                    egui::pos2(x, rect.center().y - 8.0),
+                    Align2::LEFT_CENTER,
+                    clip(&row.subject, 40),
+                    FontId::proportional(12.4),
+                    if row.seen { self.p.muted } else { self.p.ink },
+                );
+                ui.painter().text(
+                    egui::pos2(x, rect.center().y + 9.0),
+                    Align2::LEFT_CENTER,
+                    clip(&row.summary, 58),
+                    FontId::proportional(11.0),
+                    self.p.faint,
+                );
+
+                let date = short_date(row.created_at.as_deref());
+                ui.painter().text(
+                    egui::pos2(rect.right() - 14.0, rect.center().y),
+                    Align2::RIGHT_CENTER,
+                    &date,
+                    FontId::proportional(10.5),
+                    self.p.faint,
+                );
+
+                ui.add_space(height);
+                ui.add(egui::Separator::default().spacing(0.0));
+
                 if response.clicked() {
                     self.selected = Some(index);
                     self.open_selected();
                 }
-                ui.add(egui::Separator::default().spacing(0.0));
+            }
+            if rows.is_empty() {
+                ui.add_space(100.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(RichText::new("Nothing here yet").size(16.0).color(self.p.faint));
+                    ui.add_space(6.0);
+                    ui.label(RichText::new("New mail will show up here as it arrives.").size(12.0).color(self.p.faint));
+                });
             }
         });
     }
 
     fn reader_ui(&mut self, ui: &mut egui::Ui) {
-        let Some(thread) = self.thread.clone() else {
-            ui.vertical_centered(|ui| {
-                ui.add_space(120.0);
-                ui.label(RichText::new("Pick a thread").size(20.0).color(self.p.faint));
-                ui.add_space(8.0);
-                ui.label(RichText::new("j / k to move  ·  Enter to open  ·  ⌘K for every command").size(12.0).color(self.p.faint));
-            });
-            return;
-        };
-        ui.add_space(14.0);
-        ui.horizontal(|ui| {
-            ui.add_space(20.0);
-            ui.label(RichText::new(&thread.subject).size(19.0).strong().color(self.p.ink));
-        });
-        ui.add_space(8.0);
-        ui.add(egui::Separator::default().spacing(0.0));
+        egui::Frame::new().fill(self.p.window).show(ui, |ui| {
+            let Some(thread) = self.thread.clone() else {
+                ui.add_space(140.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(RichText::new("Nothing selected").size(17.0).color(self.p.faint));
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("j / k to move · Enter to open · ⌘K for everything").size(12.0).color(self.p.faint));
+                });
+                return;
+            };
 
-        let width = ui.available_width().min(760.0) - 32.0;
-        ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            for (index, message) in thread.messages.iter().enumerate() {
-                ui.add_space(16.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(20.0);
-                    avatar(ui, &message.sender_initials, "", self.p);
-                    ui.add_space(10.0);
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new(if message.sender_name.is_empty() { &message.sender_email } else { &message.sender_name }).size(13.0).strong().color(self.p.ink));
-                        ui.label(RichText::new(short_date(message.sent_at.as_deref())).size(10.5).color(self.p.faint));
-                    });
-                });
-                ui.add_space(8.0);
-                ui.indent("body", |ui| {
-                    if let Some((texture, size)) = self.body.paint(
-                        ui.ctx(),
-                        thread.topic_id as u64 * 1000 + index as u64,
-                        &message.html,
-                        width,
-                        self.p.dark,
-                    ) {
-                        let mut image = egui::Image::from_texture((texture.id(), size))
-                            .fit_to_exact_size(size)
-                            .sense(egui::Sense::hover());
-                        // Keep very long messages from swallowing the viewport.
-                        if size.y > 12000.0 {
-                            image = image.fit_to_exact_size(Vec2::new(width, 12000.0));
-                        }
-                        ui.add(image);
-                    } else {
-                        ui.label(RichText::new("(empty message)").italics().color(self.p.faint));
-                    }
-                });
-                ui.add_space(10.0);
-                ui.add(egui::Separator::default().spacing(0.0));
-            }
-            ui.add_space(18.0);
+            ui.add_space(20.0);
             ui.horizontal(|ui| {
-                ui.add_space(20.0);
-                if ui.add(egui::Button::new(RichText::new("↩  Reply").size(13.0).color(self.p.ink)).fill(self.p.hover)).clicked() {
+                ui.add_space(24.0);
+                ui.label(RichText::new(clip(&thread.subject, 70)).size(20.0).strong().color(self.p.ink));
+            });
+            ui.horizontal(|ui| {
+                ui.add_space(24.0);
+                ui.label(
+                    RichText::new(format!("{} message(s)", thread.messages.len()))
+                        .size(11.0)
+                        .color(self.p.faint),
+                );
+            });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.add_space(24.0);
+                if ui.button(RichText::new("Reply").size(11.5).strong().color(self.p.accent_ink)).clicked() {
                     self.reply_open = !self.reply_open;
                 }
+                if ui.button(RichText::new("Set Aside").size(11.5).color(self.p.ink)).clicked() {
+                    if let Some(row) = self.current_posting() {
+                        self.send(BackendCommand::Move(BoxKind::SetAside, vec![row.posting_id]));
+                        self.selected = None;
+                        self.thread = None;
+                    }
+                }
+                if ui.button(RichText::new("Trash").size(11.5).color(self.p.danger)).clicked() {
+                    if let Some(row) = self.current_posting() {
+                        self.send(BackendCommand::Trash(vec![row.posting_id]));
+                        self.selected = None;
+                        self.thread = None;
+                    }
+                }
             });
-            if self.reply_open {
-                ui.add_space(10.0);
-                ui.indent("reply", |ui| {
+            ui.add_space(12.0);
+
+            let width = ui.available_width().min(760.0) - 48.0;
+            ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                for (index, message) in thread.messages.iter().enumerate() {
+                    let frame = egui::Frame::new()
+                        .fill(self.p.card)
+                        .inner_margin(egui::Margin { left: 20, right: 20, top: 16, bottom: 18 })
+                        .stroke(egui::Stroke::new(1.0, self.p.line));
+                    frame.show(ui, |ui| {
+                        ui.set_width(width);
+                        ui.horizontal(|ui| {
+                            ui_avatar(ui, &message.sender_initials, "", self.p, 30.0);
+                            ui.add_space(9.0);
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    RichText::new(if message.sender_name.is_empty() {
+                                        &message.sender_email
+                                    } else {
+                                        &message.sender_name
+                                    })
+                                    .size(13.0)
+                                    .strong()
+                                    .color(self.p.ink),
+                                );
+                                ui.label(
+                                    RichText::new(short_date(message.sent_at.as_deref()))
+                                        .size(10.5)
+                                        .color(self.p.faint),
+                                );
+                            });
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.label(RichText::new(format!("{}", index + 1)).size(10.0).color(self.p.faint));
+                            });
+                        });
+                        ui.add_space(12.0);
+                        if let Some((texture, size)) = self.body.paint(
+                            ui.ctx(),
+                            thread.topic_id as u64 * 1000 + index as u64,
+                            &message.html,
+                            width,
+                            self.p.dark,
+                        ) {
+                            let (image_rect, _) =
+                                ui.allocate_exact_size(size, egui::Sense::hover());
+                            ui.painter().image(
+                                texture.id(),
+                                image_rect,
+                                egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1.0, 1.0)),
+                                Color32::WHITE,
+                            );
+                        } else {
+                            ui.label(RichText::new("(empty message)").italics().color(self.p.faint));
+                        }
+                    });
+                    ui.add_space(12.0);
+                }
+
+                let reply_frame = egui::Frame::new()
+                    .fill(self.p.card)
+                    .inner_margin(14.0)
+                    .stroke(egui::Stroke::new(1.0, self.p.line));
+                reply_frame.show(ui, |ui| {
+                    ui.set_width(width);
+                    ui.label(RichText::new("Reply").size(12.0).strong().color(self.p.muted));
+                    ui.add_space(6.0);
                     ui.add(
                         egui::TextEdit::multiline(&mut self.reply_text)
-                            .desired_rows(4)
+                            .desired_rows(if self.reply_open { 5 } else { 2 })
                             .hint_text("Write a reply…")
                             .desired_width(width),
                     );
                     ui.add_space(8.0);
-                    if ui.add(egui::Button::new(RichText::new("Send reply").color(self.p.accent_ink)).fill(self.p.accent)).clicked()
+                    if ui
+                        .add(
+                            egui::Button::new(RichText::new("Send reply").size(12.0).strong().color(self.p.accent_ink))
+                                .fill(self.p.accent),
+                        )
+                        .clicked()
                         && let Some(message) = thread.messages.last()
                     {
                         let html = exo_mail::text_to_html(&self.reply_text);
-                        self.send(BackendCommand::Reply { entry_id: message.id, body: html });
-                        self.reply_open = false;
+                        self.send(BackendCommand::Reply {
+                            entry_id: message.id,
+                            body: html,
+                        });
                         self.reply_text.clear();
+                        self.reply_open = false;
                     }
                 });
-            }
-            ui.add_space(40.0);
+                ui.add_space(28.0);
+            });
         });
     }
 
     fn screener_ui(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(16.0);
-        ui.horizontal(|ui| {
-            ui.add_space(20.0);
-            ui.label(RichText::new("The Screener").size(20.0).strong().color(self.p.ink));
-            ui.add_space(8.0);
-            ui.label(RichText::new("Decide who gets into your Imbox").size(12.0).color(self.p.muted));
-        });
-        ui.add_space(10.0);
-        ui.add(egui::Separator::default().spacing(0.0));
-        let items = self.screener.clone();
-        ScrollArea::vertical().show(ui, |ui| {
-            for item in &items {
-                ui.add_space(10.0);
-                egui::Frame::new().fill(self.p.card).inner_margin(12.0).show(ui, |ui| {
+        egui::Frame::new().fill(self.p.window).show(ui, |ui| {
+            ui.add_space(24.0);
+            ui.horizontal(|ui| {
+                ui.add_space(26.0);
+                ui.label(RichText::new("The Screener").size(22.0).strong().color(self.p.ink));
+            });
+            ui.horizontal(|ui| {
+                ui.add_space(26.0);
+                ui.label(RichText::new("You decide who gets into your Imbox.").size(12.5).color(self.p.muted));
+            });
+            ui.add_space(16.0);
+            let items = self.screener.clone();
+            ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                for item in &items {
+                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        avatar(ui, &initials(&item.sender_name), "", self.p);
-                        ui.add_space(10.0);
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new(if item.sender_name.is_empty() { &item.sender_email } else { &item.sender_name }).strong().color(self.p.ink));
-                            ui.label(RichText::new(&item.subject).size(12.0).color(self.p.ink));
-                            ui.label(RichText::new(&item.summary).size(11.0).color(self.p.faint));
-                        });
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.add(egui::Button::new("Deny").fill(self.p.hover)).clicked() {
-                                self.send(BackendCommand::Screen(item.clearance_id, false));
-                            }
-                            if ui.add(egui::Button::new(RichText::new("Allow").color(self.p.accent_ink)).fill(self.p.accent)).clicked() {
-                                self.send(BackendCommand::Screen(item.clearance_id, true));
-                            }
+                        ui.add_space(26.0);
+                        let card = egui::Frame::new()
+                            .fill(self.p.card)
+                            .inner_margin(16.0)
+                            .stroke(egui::Stroke::new(1.0, self.p.line));
+                        card.show(ui, |ui| {
+                            ui.set_width(ui.available_width() - 26.0);
+                            ui.horizontal(|ui| {
+                                ui_avatar(ui, &initials(&item.sender_name), "", self.p, 34.0);
+                                ui.add_space(12.0);
+                                ui.vertical(|ui| {
+                                    ui.label(RichText::new(if item.sender_name.is_empty() { &item.sender_email } else { &item.sender_name }).size(13.5).strong().color(self.p.ink));
+                                    ui.label(RichText::new(&item.subject).size(12.5).color(self.p.ink));
+                                    ui.label(RichText::new(&item.summary).size(11.5).color(self.p.muted));
+                                });
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    if ui.add(egui::Button::new(RichText::new("Turn away").size(11.5).color(self.p.danger))).clicked() {
+                                        self.send(BackendCommand::Screen(item.clearance_id, false));
+                                    }
+                                    if ui.add(egui::Button::new(RichText::new("Let in").size(11.5).strong().color(self.p.accent_ink)).fill(self.p.accent)).clicked() {
+                                        self.send(BackendCommand::Screen(item.clearance_id, true));
+                                    }
+                                });
+                            });
                         });
                     });
-                });
-            }
-            if items.is_empty() {
-                ui.add_space(60.0);
-                ui.vertical_centered(|ui| {
-                    ui.label(RichText::new("Nobody is waiting.").size(16.0).color(self.p.faint));
-                    ui.label(RichText::new("New senders will appear here.").size(12.0).color(self.p.faint));
-                });
-            }
+                }
+                if items.is_empty() {
+                    ui.add_space(100.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(RichText::new("Nobody is waiting").size(17.0).color(self.p.faint));
+                        ui.add_space(6.0);
+                        ui.label(RichText::new("New senders appear here before reaching your Imbox.").size(12.0).color(self.p.faint));
+                    });
+                }
+            });
         });
     }
 
     fn search_ui(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(16.0);
-        ui.horizontal(|ui| {
-            ui.add_space(20.0);
-            ui.label(RichText::new("Search").size(20.0).strong().color(self.p.ink));
-            ui.add_space(12.0);
-            ui.text_edit_singleline(&mut self.search_text);
-            if ui.button("Search").clicked() {
-                let query = self.search_text.clone();
-                self.send(BackendCommand::Search(query));
-            }
-        });
-        ui.add_space(10.0);
-        ui.add(egui::Separator::default().spacing(0.0));
-        if let Some(hits) = self.hits.clone() {
-            ScrollArea::vertical().show(ui, |ui| {
-                for hit in &hits {
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        ui.add_space(20.0);
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new(&hit.subject).strong().color(self.p.ink));
-                            ui.label(RichText::new(format!("{} — {}", hit.sender_name, hit.summary)).size(11.0).color(self.p.muted));
-                        });
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.button("Open").clicked() {
-                                self.view = View::Mail;
-                                self.send(BackendCommand::LoadThread(hit.topic_id));
-                            }
-                        });
-                    });
+        egui::Frame::new().fill(self.p.window).show(ui, |ui| {
+            ui.add_space(24.0);
+            ui.horizontal(|ui| {
+                ui.add_space(26.0);
+                ui.label(RichText::new("Search").size(22.0).strong().color(self.p.ink));
+                ui.add_space(16.0);
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut self.search_text)
+                        .hint_text("Search all mail…")
+                        .desired_width(340.0),
+                );
+                if self.search_focus {
+                    response.request_focus();
+                    self.search_focus = false;
                 }
-                if hits.is_empty() {
-                    ui.add_space(40.0);
-                    ui.vertical_centered(|ui| { ui.label(RichText::new("No matches").color(self.p.faint)); });
+                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    let query = self.search_text.clone();
+                    self.send(BackendCommand::Search(query));
+                }
+                if ui.button("Search").clicked() {
+                    let query = self.search_text.clone();
+                    self.send(BackendCommand::Search(query));
                 }
             });
-        }
+            ui.add_space(14.0);
+            if let Some(hits) = self.hits.clone() {
+                ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                    for hit in &hits {
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.add_space(26.0);
+                            let card = egui::Frame::new().fill(self.p.card).inner_margin(14.0).stroke(egui::Stroke::new(1.0, self.p.line));
+                            card.show(ui, |ui| {
+                                ui.set_width(ui.available_width() - 26.0);
+                                ui.horizontal(|ui| {
+                                    ui.vertical(|ui| {
+                                        ui.label(RichText::new(&hit.subject).size(13.0).strong().color(self.p.ink));
+                                        ui.label(RichText::new(format!("{} — {}", hit.sender_name, hit.summary)).size(11.5).color(self.p.muted));
+                                    });
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        if ui.button("Open").clicked() {
+                                            self.view = View::Mail;
+                                            self.send(BackendCommand::LoadThread(hit.topic_id));
+                                        }
+                                    });
+                                });
+                            });
+                        });
+                    }
+                    if hits.is_empty() {
+                        ui.add_space(80.0);
+                        ui.vertical_centered(|ui| { ui.label(RichText::new("No matches").color(self.p.faint)); });
+                    }
+                });
+            }
+        });
     }
 
     fn compose_ui(&mut self, ui: &mut egui::Ui, mut compose: ComposeDraft) {
         let mut send = false;
         let mut draft = false;
-        ui.horizontal(|ui| {
-            ui.label("To");
-            ui.add(egui::TextEdit::singleline(&mut compose.to).desired_width(ui.available_width()));
-        });
-        ui.horizontal(|ui| {
-            ui.label("Subject");
-            ui.add(egui::TextEdit::singleline(&mut compose.subject).desired_width(ui.available_width()));
-        });
-        ui.add_space(6.0);
-        ui.add(
-            egui::TextEdit::multiline(&mut compose.body)
-                .desired_rows(14)
-                .hint_text("Write your message…")
-                .desired_width(f32::INFINITY),
-        );
-        ui.add_space(10.0);
-        ui.horizontal(|ui| {
-            if ui.add(egui::Button::new(RichText::new("Send").color(self.p.accent_ink)).fill(self.p.accent)).clicked() { send = true; }
-            if ui.button("Save draft").clicked() { draft = true; }
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button("Discard").clicked() { self.compose = None; }
+        egui::Frame::new().fill(self.p.panel).inner_margin(18.0).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("To").size(11.5).color(self.p.faint));
+                ui.add(egui::TextEdit::singleline(&mut compose.to).desired_width(ui.available_width()));
+            });
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Subject").size(11.5).color(self.p.faint));
+                ui.add(egui::TextEdit::singleline(&mut compose.subject).desired_width(ui.available_width()));
+            });
+            ui.add_space(10.0);
+            ui.add(egui::Separator::default().spacing(0.0));
+            ui.add_space(10.0);
+            ui.add(
+                egui::TextEdit::multiline(&mut compose.body)
+                    .desired_rows(14)
+                    .hint_text("Write your message…")
+                    .desired_width(f32::INFINITY)
+                    .frame(egui::Frame::NONE),
+            );
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                if ui.add(
+                    egui::Button::new(RichText::new("Send").size(12.5).strong().color(self.p.accent_ink)).fill(self.p.accent).min_size(Vec2::new(90.0, 32.0)),
+                ).clicked() {
+                    send = true;
+                }
+                if ui.button(RichText::new("Save draft").size(12.0).color(self.p.ink)).clicked() {
+                    draft = true;
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.button(RichText::new("Discard").size(11.5).color(self.p.faint)).clicked() {
+                        self.compose = None;
+                    }
+                });
             });
         });
         self.compose = Some(compose);
-        if send {
-            self.send(BackendCommand::Send {
-                to: split_addresses(&self.compose.as_ref().unwrap().to),
-                subject: self.compose.as_ref().unwrap().subject.clone(),
-                body: exo_mail::text_to_html(&self.compose.as_ref().unwrap().body),
-            });
-            self.compose = None;
-        } else if draft {
-            self.send(BackendCommand::SaveDraft {
-                to: split_addresses(&self.compose.as_ref().unwrap().to),
-                subject: self.compose.as_ref().unwrap().subject.clone(),
-                body: exo_mail::text_to_html(&self.compose.as_ref().unwrap().body),
-            });
+        if send || draft {
+            let current = self.compose.clone().unwrap();
+            let to = split_addresses(&current.to);
+            if to.is_empty() {
+                self.error = Some("Add at least one recipient".into());
+                return;
+            }
+            let command = if send {
+                BackendCommand::Send {
+                    to,
+                    subject: current.subject,
+                    body: exo_mail::text_to_html(&current.body),
+                }
+            } else {
+                BackendCommand::SaveDraft {
+                    to,
+                    subject: current.subject,
+                    body: exo_mail::text_to_html(&current.body),
+                }
+            };
+            self.send(command);
             self.compose = None;
         }
+    }
+}
+
+// Small presentation helpers for the redesigned panes.
+fn ui_avatar(ui: &mut egui::Ui, initials: &str, color: &str, p: Palette, size: f32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+    let fill = parse_color(color).unwrap_or_else(|| {
+        if p.dark {
+            Color32::from_rgb(70, 76, 88)
+        } else {
+            Color32::from_rgb(216, 224, 236)
+        }
+    });
+    ui.painter().circle_filled(rect.center(), size / 2.0, fill);
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        initials.chars().take(2).collect::<String>(),
+        FontId::proportional(size * 0.36),
+        if p.dark { Color32::WHITE } else { Color32::from_rgb(48, 62, 82) },
+    );
+}
+
+fn clip(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+fn today_ymd() -> (i64, u32, u32) {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let days = secs.div_euclid(86_400);
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let mut y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = mp + if mp < 10 { 3 } else { -9 };
+    y += if m <= 2 { 1 } else { 0 };
+    (y, m as u32, d as u32)
+}
+
+fn ymd_to_days(y: i64, m: u32, d: u32) -> i64 {
+    let y = y - if m <= 2 { 1 } else { 0 };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = m as i64 + if m > 2 { -3 } else { 9 };
+    let doy = (153 * mp + 2) / 5 + d as i64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+fn group_label(iso: Option<&str>) -> String {
+    let Some(iso) = iso else { return "Undated".into() };
+    if iso.len() < 10 { return "Undated".into() }
+    let (y, m, d) = (
+        iso[0..4].parse::<i64>().unwrap_or(1970),
+        iso[5..7].parse::<u32>().unwrap_or(1),
+        iso[8..10].parse::<u32>().unwrap_or(1),
+    );
+    let (ty, tm, td) = today_ymd();
+    let diff = ymd_to_days(ty, tm, td) - ymd_to_days(y, m, d);
+    match diff {
+        0 => "Today".into(),
+        1 => "Yesterday".into(),
+        2..=7 => "This week".into(),
+        8..=31 => "This month".into(),
+        _ => format!("{y}"),
     }
 }
 
@@ -904,22 +1309,6 @@ impl eframe::App for ExoApp {
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
     }
-}
-
-fn avatar(ui: &mut egui::Ui, initials: &str, color: &str, p: Palette) {
-    let size = 28.0;
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
-    let fill = parse_color(color).unwrap_or_else(|| {
-        if p.dark { Color32::from_rgb(74, 74, 82) } else { Color32::from_rgb(218, 218, 224) }
-    });
-    ui.painter().circle_filled(rect.center(), size / 2.0, fill);
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        initials.chars().take(2).collect::<String>(),
-        FontId::proportional(10.5),
-        if p.dark { Color32::WHITE } else { Color32::from_rgb(40, 40, 44) },
-    );
 }
 
 fn parse_color(value: &str) -> Option<Color32> {

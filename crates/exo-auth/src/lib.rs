@@ -84,34 +84,39 @@ impl CredentialStore {
         let entry = keyring::Entry::new(SERVICE, ACCOUNT)
             .ok()
             .map(Arc::new);
-        let fallback = dirs::data_local_dir()
+        let fallback = dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("exo")
+            .join("Exo")
             .join("credentials.json");
         Self { entry, fallback }
     }
 
     pub fn load(&self) -> Result<Option<Credentials>, AuthError> {
-        if let Some(entry) = &self.entry {
-            if let Ok(value) = entry.get_password() {
+        // The private file is the source of truth: the keychain is best-effort and can be
+        // unavailable on Linux (no Secret Service) or refuse access without a prompt.
+        match std::fs::read_to_string(&self.fallback) {
+            Ok(value) => {
                 if let Ok(creds) = serde_json::from_str(&value) {
                     return Ok(Some(creds));
                 }
             }
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+            _ => {}
         }
-        match std::fs::read_to_string(&self.fallback) {
-            Ok(value) => Ok(serde_json::from_str(&value).ok()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(e.into()),
+        if let Some(entry) = &self.entry
+            && let Ok(value) = entry.get_password()
+            && let Ok(creds) = serde_json::from_str(&value)
+        {
+            return Ok(Some(creds));
         }
+        Ok(None)
     }
 
     pub fn save(&self, creds: &Credentials) -> Result<(), AuthError> {
         let value = serde_json::to_string(creds)?;
+        // Write both. If the keychain later refuses a read, the file still carries the session.
         if let Some(entry) = &self.entry {
-            if entry.set_password(&value).is_ok() {
-                return Ok(());
-            }
+            let _ = entry.set_password(&value);
         }
         if let Some(parent) = self.fallback.parent() {
             std::fs::create_dir_all(parent)?;

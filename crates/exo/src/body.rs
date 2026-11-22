@@ -73,7 +73,11 @@ impl BodyRenderer {
                 width: view.content_width(),
                 phase: [0.0; 2],
             },
-            [0, 0, 0, 0],
+            if dark {
+                [32, 35, 40, 255]
+            } else {
+                [255, 255, 255, 255]
+            },
         );
         if image.rgba.is_empty() || image.width == 0 || image.height == 0 {
             return None;
@@ -93,3 +97,4 @@ impl BodyRenderer {
         Some(result)
     }
 }
+

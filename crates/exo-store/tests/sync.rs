@@ -150,3 +150,10 @@ fn resolves_topic_ids_from_hey_urls() {
     );
     assert_eq!(exo_store::topic_id_in_public("/contacts/9"), None);
 }
+
+#[test]
+fn unwraps_hey_trix_html() {
+    let raw = r#"<div><figure data-trix-attachment="{&quot;contentType&quot;:&quot;text/html&quot;,&quot;content&quot;:&quot;&lt;shadow-content&gt;&lt;template&gt;&lt;p&gt;Hello &lt;strong&gt;HEY&lt;/strong&gt;&lt;/p&gt;&lt;/template&gt;&lt;/shadow-content&gt;&quot;}"></figure></div>"#;
+    assert_eq!(exo_store::unwrap_hey_html(raw), "<p>Hello <strong>HEY</strong></p>");
+    assert_eq!(exo_store::unwrap_hey_html("<p>Plain</p>"), "<p>Plain</p>");
+}

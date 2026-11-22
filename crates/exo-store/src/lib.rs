@@ -92,6 +92,85 @@ fn iso(dt: Option<&hey_sdk::DateTime>) -> Option<String> {
     dt.map(|d| d.to_string())
 }
 
+/// HEY's message bodies come back as a Trix attachment whose `content` is HTML-escaped a
+/// second time and wrapped in `<shadow-content><template>`. Unwrap it so Blitz lays out the
+/// actual message instead of an empty template element.
+pub fn unwrap_hey_html(raw: &str) -> String {
+    let mut html = raw.to_string();
+    if let Some(marker) = raw.find("data-trix-attachment=\"") {
+        let rest = &raw[marker + "data-trix-attachment=\"".len()..];
+        if let Some(end) = rest.find('"') {
+            let json = unescape_html(&rest[..end]);
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json)
+                && let Some(content) = value.get("content").and_then(|v| v.as_str())
+            {
+                html = unescape_html(content);
+            }
+        }
+    }
+    for wrapper in [
+        ("<shadow-content><template>", "</template></shadow-content>"),
+        ("<template>", "</template>"),
+    ] {
+        if html.trim_start().starts_with(wrapper.0) {
+            if let Some(end) = html.rfind(wrapper.1) {
+                let start = html.find(wrapper.0).unwrap() + wrapper.0.len();
+                return html[start..end].trim().to_string();
+            }
+        }
+    }
+    html
+}
+
+fn unescape_html(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '&' {
+            out.push(ch);
+            continue;
+        }
+        let mut entity = String::new();
+        while let Some(&next) = chars.peek() {
+            entity.push(next);
+            chars.next();
+            if next == ';' {
+                break;
+            }
+            if entity.len() > 12 {
+                break;
+            }
+        }
+        let decoded = match entity.as_str() {
+            "lt;" => Some('<'),
+            "gt;" => Some('>'),
+            "quot;" => Some('"'),
+            "amp;" => Some('&'),
+            "apos;" | "#39;" => Some('\''),
+            "nbsp;" => Some('\u{a0}'),
+            _ => {
+                if let Some(hex) = entity.strip_prefix("#x").and_then(|s| s.strip_suffix(';')) {
+                    u32::from_str_radix(hex, 16)
+                        .ok()
+                        .and_then(char::from_u32)
+                } else if let Some(dec) = entity.strip_prefix('#').and_then(|s| s.strip_suffix(';')) {
+                    dec.parse::<u32>().ok().and_then(char::from_u32)
+                } else {
+                    None
+                }
+            }
+        };
+        match decoded {
+            Some(c) => out.push(c),
+            None => {
+                out.push('&');
+                out.push_str(&entity);
+            }
+        }
+    }
+    out
+}
+
 /// The local cache and the HEY client, in one handle. `Clone` shares both.
 #[derive(Clone)]
 pub struct Store {
@@ -392,12 +471,12 @@ impl Store {
             let detail = self.client.messages().get(entry.id).await.ok();
             let (html, subject, sent_at) = match &detail {
                 Some(message) => (
-                    message.content.clone().unwrap_or_default(),
+                    unwrap_hey_html(&message.content.clone().unwrap_or_default()),
                     message.subject.clone().unwrap_or_default(),
                     iso(message.created_at.as_ref()),
                 ),
                 None => (
-                    entry.content.clone().unwrap_or_default(),
+                    unwrap_hey_html(&entry.content.clone().unwrap_or_default()),
                     entry.subject.clone().unwrap_or_default(),
                     iso(entry.created_at.as_ref()),
                 ),
