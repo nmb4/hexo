@@ -324,10 +324,17 @@ impl FontBook {
             let name = face.postscript_name();
             let data = match face.source() {
                 Source::Exo(font) => FontData::from_static(font.data),
-                Source::System(_, path) => FontData::from_owned(
-                    std::fs::read(path)
-                        .map_err(|source| AssetError::SystemFont { path, source })?,
-                ),
+                Source::System(_, path) => match std::fs::read(path) {
+                    Ok(bytes) => FontData::from_owned(bytes),
+                    // macOS system faces are absent elsewhere: fall back to a compiled-in Exo
+                    // face so fonts, icons and image loaders still get installed.
+                    Err(_) => FontData::from_static(match face {
+                        Face::Courier => exo_fonts::MONO.data,
+                        Face::ArialBold => exo_fonts::SANS_BOLD.data,
+                        Face::SystemUi | Face::Helvetica => exo_fonts::SANS_REGULAR.data,
+                        _ => exo_fonts::SANS_REGULAR.data,
+                    }),
+                },
             };
             let bytes: &[u8] = &data.font;
             // A collection's face is the one with the face's name (Courier.ttc holds four).
